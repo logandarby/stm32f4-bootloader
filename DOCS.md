@@ -40,38 +40,63 @@ The physical layer uses standard 8N1 asynchronous serial communication operating
 
 ### Packet Transfer
 
-Packets are
+Packets are **19 bytes** total and sent over the UART stream using the following structure:
 
-* 18 bytes
-* Byte 0: Length OR Special Packet Sentinel
-* Bytes 1-16: Data
-* Byte 17: CRC8
+* **Byte 0:** Start of Frame (SOF) Sentinel (`0xAA`)
+* **Byte 1:** Control & Length Header Byte
+    * **Bits [7:4] (Upper Nibble):** Control Flags
+    * **Bits [3:0] (Lower Nibble):** Payload Length minus 1 (`0x0` to `0xF` representing 1 to 16 bytes)
 
-Special Packets/Bytes:
+* **Bytes 2–17:** Data Payload (16 bytes, padded with `0xFF` if payload length is smaller)
+* **Byte 18:** CRC8 (Calculated over Bytes 1–17: Header + Data)
 
-| Byte | Value | Description |
+#### Header Control Nibble Definitions
+
+| Nibble Value | Flag | Description |
 | --- | --- | --- |
-| 1 | `0x15` | ACK - Acknowledge |
-| 1 | `0x19` | ReTx - Request Retransmit |
-| Data Bytes | `0xFF` | Padding - Must be used when data is not meant to occupy data slots |
+| `0x00` | NONE | Standard Data Packet |
+| `0x10` | ACK | Acknowledge Packet |
+| `0x20` | ReTx | Request Retransmit Packet |
 
-The following state machine diagram represents the protocol used to transfer packets of data over UART
+#### Constants & Parameters
+
+| Byte / Parameter | Value | Description |
+| --- | --- | --- |
+| `SOF` | `0xAA` | Start of Frame Sync Marker |
+| Data Bytes Padding | `0xFF` | Padding used to fill unused slots in the 16-byte data buffer |
+| Max ReTx Attempts | `3` | Maximum consecutive retransmit attempts allowed before aborting |
+
+#### Protocol State Machine
+
+The following state machine diagram represents the frame synchronization and processing pipeline used over UART:
 
 ```mermaid
 flowchart TD
-    A[Receive<br/>length byte] --> B[Receive data<br/>bytes]
-    B --> C[Receive CRC<br/>byte]
+    A[Wait for SOF Byte<br/>0xAA] --> B[Receive Header<br/>Control & Length]
+    B --> C[Receive 16 Data<br/>Bytes]
+    C --> D[Receive CRC<br/>Byte]
 
-    C -->|Is ReTx| D[Retransmit<br/>last packet]
-    D --> A
-
-    C -->|Bad CRC| E[Send ReTx]
-    E --> A
-    C -->|Is ACK| A
-    C -->|Is Data| F[Transmit<br/>acknowledge]
-    F --> G[Store packet<br/>in buffer]
+    D -->|Bad CRC| E{ReTx Count<br/><= 3?}
+    E -->|Yes| F[Send ReTx<br/>Increment Count]
+    E -->|No| G[Abort Transfer<br/>Reset Count]
+    F --> A
     G --> A
 
+    D -->|Valid CRC| H{Check Header<br/>Control Bits}
+
+    H -->|Is ReTx| I{ReTx Count<br/><= 3?}
+    I -->|Yes| J[Retransmit Last Packet<br/>Increment Count]
+    I -->|No| K[Abort Retransmit<br/>Reset Count]
+    J --> A
+    K --> A
+
+    H -->|Is ACK| L[Reset ReTx Count]
+    L --> A
+
+    H -->|Is Data| M[Reset ReTx Count]
+    M --> N[Transmit ACK]
+    N --> O[Store Packet<br/>in Buffer]
+    O --> A
 
 ```
 

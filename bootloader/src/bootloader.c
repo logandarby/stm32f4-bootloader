@@ -32,12 +32,9 @@ static NORETURN void jump_to_main(void) {
 
 static void handle_uart(void) {
   packet_t test = {
-      .length = 12,
-      .data = {'H', 'e', 'l', 'l', 'o', ' ', 'w', 'o', 'r', 'l', 'd', '!',
-               0xFF, 0xFF, 0xFF, 0xFF},
-      .crc = 0,
+      .data = {'H', 'e', 'l', 'l', 'o', ' ', 'w', 'o', 'r', 'l', 'd', '!'},
   };
-  test.crc = packet_compute_crc(&test);
+  packet_init(&test, 12);
   packet_send(&test);
 }
 
