@@ -29,7 +29,7 @@ ENTRY(reset_handler)
 /* Define memory regions. */
 MEMORY
 {
-    rom (rx)  : ORIGIN = 0x08000000, LENGTH = 512K
+    rom (rx)  : ORIGIN = 0x08000000, LENGTH = 32K
 		ram (rwx) : ORIGIN = 0x20000000, LENGTH = 96K
 }
 
@@ -37,8 +37,6 @@ MEMORY
 SECTIONS
 {
 	.text : {
-		KEEP (*(.bootloader_section))	/* Bootloader */
-		. = ORIGIN(rom) + 0x8000;
 		*(.vectors)	/* Vector table */
 		*(.text*)	/* Program code */
 		. = ALIGN(4);

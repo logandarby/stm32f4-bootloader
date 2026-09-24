@@ -6,8 +6,11 @@ endif
 
 SRC_DIR        = src
 OBJ_DIR        = obj
+COMMON_DIR     = ../common
+BOOTLOADER_DIR = ../bootloader
 OPENCM3_DIR    = ../libopencm3
 
+BOOTLOADER_BIN = $(BOOTLOADER_DIR)/bootloader.bin
 BINARY         = firmware
 
 ###############################################################################
@@ -23,13 +26,16 @@ ARCH_FLAGS      = -mthumb -mcpu=cortex-m4 $(FP_FLAGS)
 
 LDSCRIPT        = linkerscript.ld
 LDLIBS          += -l$(LIBNAME)
+LDLIBS          += -lcommon
 LDFLAGS         += -L$(OPENCM3_DIR)/lib
+LDFLAGS					+= -L$(COMMON_DIR)
 
 ###############################################################################
 # Includes
 
 DEFS            += -I$(OPENCM3_DIR)/include
 DEFS            += -I$(SRC_DIR)
+DEFS						+= -I$(COMMON_DIR)/src
 
 ###############################################################################
 # Executables
@@ -147,7 +153,7 @@ print-%:
 	$(Q)$(OBJDUMP) -S $< > $@
 
 # Link the final binary
-%.elf %.map: $(OBJS) $(LDSCRIPT) $(OPENCM3_DIR)/lib/lib$(LIBNAME).a Makefile
+%.elf %.map: $(OBJS) $(LDSCRIPT) $(OPENCM3_DIR)/lib/lib$(LIBNAME).a $(COMMON_DIR)/libcommon.a $(BOOTLOADER_BIN) Makefile
 	$(Q)$(LD) $(TGT_LDFLAGS) $(LDFLAGS) $(OBJS) $(LDLIBS) -o $*.elf
 
 # Compile C sources
@@ -169,6 +175,18 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cxx
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp
 	@mkdir -p $(@D)
 	$(Q)$(CXX) $(TGT_CXXFLAGS) $(CXXFLAGS) $(TGT_CPPFLAGS) $(CPPFLAGS) -o $@ -c $<
+
+# Make sure common directory is compiled
+$(COMMON_DIR)/libcommon.a:
+	$(warning libcommon.a not found, attempting to rebuild in $(COMMON_DIR))
+	$(MAKE) -C $(COMMON_DIR)
+
+# Make sure bootloader directory is compiled
+$(BOOTLOADER_BIN):
+	$(warning bootloader.bin not found, attempting to rebuild in $(BOOTLOADER_DIR))
+	$(MAKE) -C $(BOOTLOADER_DIR)
+
+$(OBJ_DIR)/bootloader.o: $(BOOTLOADER_BIN)
 
 clean:
 	$(Q)$(RM) $(GENERATED_BINARIES) generated.*

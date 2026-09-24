@@ -6,6 +6,7 @@
 - Install stlink-tools https://github.com/stlink-org/stlink
 - Install GCC tool chain with arm-none-eabi (https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads)
 - Make (https://www.gnu.org/software/make/)
+- Python3
 
 I am personally using WSL on windows.
 

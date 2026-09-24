@@ -1,9 +1,8 @@
 #ifndef BC875EB7_F88A_4063_8E40_26D495BDC53F
 #define BC875EB7_F88A_4063_8E40_26D495BDC53F
 
-#include <common.h>
+#include "common.h"
 
-#define CPU_FREQ_HZ (84000000)
 #define SYS_TICK_FREQ_HZ (1000)
 
 /**

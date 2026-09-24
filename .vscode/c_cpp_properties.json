@@ -4,7 +4,8 @@
             "name": "Linux",
             "includePath": [
                 "${workspaceFolder}/firmware/src/**",
-                "${workspaceFolder}/libopencm3/include"
+                "${workspaceFolder}/libopencm3/include",
+                "${workspaceFolder}/common/src"
             ],
             "defines": [
                 "STM32F4",

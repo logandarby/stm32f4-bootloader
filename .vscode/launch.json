@@ -15,7 +15,7 @@
       ],
       "gdbPath": "gdb-multiarch",
       "runToEntryPoint": "main",
-      "preLaunchTask": "build"
+      "preLaunchTask": "build",
     }
   ]
 }
