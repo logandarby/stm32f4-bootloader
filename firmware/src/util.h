@@ -1,0 +1,8 @@
+#ifndef BBA35E57_FC98_49DE_A938_CADC8448A109
+#define BBA35E57_FC98_49DE_A938_CADC8448A109
+
+#include "common.h"
+
+bool is_power_of_2(size_t x);
+
+#endif /* BBA35E57_FC98_49DE_A938_CADC8448A109 */

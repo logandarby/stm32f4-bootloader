@@ -1,0 +1,21 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Cortex Debug",
+      "type": "cortex-debug",
+      "request": "launch",
+      "servertype": "openocd",
+      "cwd": "${workspaceFolder}",
+      "executable": "${workspaceFolder}/firmware/firmware.elf",
+      "device": "STM32F401RE",
+      "configFiles": [
+        "interface/stlink.cfg",
+        "target/stm32f4x.cfg"
+      ],
+      "gdbPath": "gdb-multiarch",
+      "runToEntryPoint": "main",
+      "preLaunchTask": "build"
+    }
+  ]
+}

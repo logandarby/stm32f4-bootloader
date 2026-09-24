@@ -16,6 +16,7 @@ void system_enable(void);
  */
 uint64_t system_get_ms(void);
 
+// DO NOT Call this
 void sys_tick_handler(void);
 
 #endif /* BC875EB7_F88A_4063_8E40_26D495BDC53F */

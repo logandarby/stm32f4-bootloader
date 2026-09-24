@@ -4,6 +4,9 @@
 #include <libopencm3/cm3/systick.h>
 #include <libopencm3/stm32/rcc.h>
 
+// SAFETY: Should never be written to, with exception of sys_tick_handler.
+// When read, should either be in a critical section, or use some other
+// technique to avoid torn reads
 static volatile uint64_t system_ms = 0;
 
 void sys_tick_handler(void) {
