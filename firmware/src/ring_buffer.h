@@ -6,6 +6,7 @@
 typedef struct {
   uint8_t* buffer;
   size_t buffer_size;
+  size_t item_size;  // Supports generic data types
   uint32_t mask;
   volatile size_t read_idx;  // Volatile for interrupt safety
   volatile size_t write_idx;
@@ -13,12 +14,13 @@ typedef struct {
 
 /**
  * Initializes a ring buffer and returns it.
- * The buffer size must be a power of 2
- * The ring buffer owns the buffer
- * SAFETY: This only works with SPSC code. It is not
+ * The buffer_size (number of elements) must be a power of 2.
+ * The item size is the size of the items you wish to store
+ * The backing buffer must be at least (buffer_size * item_size) bytes
+ * large. SAFETY: This only works with SPSC code. It is not
  * thread-safe/multi-interrupt safe.
  */
-ringbuffer_t rb_init(uint8_t* buffer, size_t buffer_size);
+ringbuffer_t rb_init(void* buffer, size_t buffer_size, size_t item_size);
 
 /**
  * Returns if the ring buffer is empty
@@ -26,14 +28,14 @@ ringbuffer_t rb_init(uint8_t* buffer, size_t buffer_size);
 bool rb_is_empty(const ringbuffer_t* rb);
 
 /**
- * Writes a byte to rb
+ * Writes an item to rb
  */
-bool rb_write_byte(ringbuffer_t* rb, const uint8_t byte);
+bool rb_write(ringbuffer_t* rb, const void* data);
 
 /**
- * Read a byte into byte_buffer
- * Returns if successfull
+ * Read an item into data
+ * Returns if successful
  */
-bool rb_read_byte(ringbuffer_t* rb, uint8_t* byte_buffer);
+bool rb_read(ringbuffer_t* rb, void* data);
 
 #endif /* DC3FC35D_4447_46D1_9BD4_3F49DC3BA0C6 */

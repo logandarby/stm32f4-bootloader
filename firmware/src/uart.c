@@ -21,14 +21,14 @@ void usart2_isr(void) {
   const bool is_recv = usart_get_flag(USART2, USART_FLAG_RXNE);
   const bool is_overrun = usart_get_flag(USART2, USART_FLAG_ORE);
   if (is_recv || is_overrun) {
-    uint16_t byte = usart_recv(USART2);
-    rb_write_byte(&uart_ringbuffer, (uint8_t)byte);
+    uint8_t byte = (uint8_t)usart_recv(USART2);
+    rb_write(&uart_ringbuffer, &byte);
   }
 }
 
 // We enable UART2 here, and set up the GPIO stuff
 void uart_setup(void) {
-  uart_ringbuffer = rb_init(_buffer, BUFFER_SIZE);
+  uart_ringbuffer = rb_init(_buffer, BUFFER_SIZE, sizeof(uint8_t));
 
   rcc_periph_clock_enable(RCC_GPIOA);
   rcc_periph_clock_enable(RCC_USART2);
@@ -76,7 +76,7 @@ size_t uart_read(uint8_t* byte_buffer, size_t buffer_len) {
   }
   for (size_t i = 0; i < buffer_len; i++) {
     if (!uart_is_data_available() ||
-        !rb_read_byte(&uart_ringbuffer, &byte_buffer[i])) {
+        !rb_read(&uart_ringbuffer, &byte_buffer[i])) {
       return i;
     }
   }
