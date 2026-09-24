@@ -25,8 +25,8 @@ ARCH_FLAGS     = -mthumb -mcpu=cortex-m4 $(FP_FLAGS)
 LDSCRIPT       = linkerscript.ld
 LDLIBS         += -lcommon
 LDLIBS         += -l$(LIBNAME)
-LDFLAGS        += -L$(OPENCM3_DIR)/lib
 LDFLAGS        += -L$(COMMON_DIR)
+LDFLAGS        += -L$(OPENCM3_DIR)/lib
 
 ###############################################################################
 # Includes

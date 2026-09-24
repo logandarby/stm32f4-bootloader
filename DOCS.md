@@ -4,9 +4,13 @@ Here is your updated Markdown document with the **UART** section filled out to a
 
 ## Preliminary Information
 
+
+* C Standard: C99
 * Size: 32KiB
-* Start Addr: `0x8000000`
-* End Addr: `0x80008000`
+* Start Addr: `0x0800 0000`
+* End Addr: `0x0800 7FFF`
+
+The bootloader lives in the first two sectors of flash memory. The firmware lives in sectors (2 - 7) from addresses `0x0800 8000` - `0x0807 FFFF`.
 
 ## Firmware Update Mechanism
 
