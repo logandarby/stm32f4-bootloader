@@ -28,7 +28,7 @@ void usart2_isr(void) {
 
 // We enable UART2 here, and set up the GPIO stuff
 void uart_setup(void) {
-  uart_ringbuffer = rb_init(_buffer, BUFFER_SIZE, sizeof(uint8_t));
+  uart_ringbuffer = rb_init(_buffer, BUFFER_SIZE, sizeof(_buffer[0]));
 
   rcc_periph_clock_enable(RCC_GPIOA);
   rcc_periph_clock_enable(RCC_USART2);
@@ -56,13 +56,15 @@ bool uart_is_data_available(void) {
 
 void uart_send_byte(uint8_t byte1) { usart_send_blocking(USART2, byte1); }
 
-size_t uart_send(uint8_t* bytes, size_t bytes_len) {
+size_t uart_send(const uint8_t* bytes, size_t bytes_len) {
   if (!bytes || !bytes_len) {
     return 0;
   }
   for (size_t i = 0; i < bytes_len; i++) {
     uart_send_byte(bytes[i]);
   }
+  // Wait for transmission complete
+  while (!usart_get_flag(USART2, USART_FLAG_TC));
   return bytes_len;
 }
 

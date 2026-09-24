@@ -11,7 +11,7 @@
         "isDefault": true
       },
       "options": {
-        "cwd": "${workspaceFolder}/firmware",
+        "cwd": "${workspaceFolder}",
       },
       "problemMatcher": ["$gcc"]
     }

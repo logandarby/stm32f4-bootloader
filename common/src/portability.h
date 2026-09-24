@@ -28,4 +28,20 @@
 #endif
 #endif
 
+//-------------------------------
+// PACKED
+//-------------------------------
+
+#if defined(_MSC_VER)
+#define PACKED_STRUCT_BEGIN __pragma(pack(push, 1))
+#define PACKED_STRUCT_END __pragma(pack(pop))
+#define PACKED
+#elif defined(__GNUC__) || defined(__clang__)
+#define PACKED_STRUCT_BEGIN
+#define PACKED_STRUCT_END
+#define PACKED __attribute__((packed))
+#else
+#error "Packed structs are not supported on this compiler"
+#endif
+
 #endif /* C751D214_288B_4768_8F18_4FA61E631139 */

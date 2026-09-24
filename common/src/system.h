@@ -8,14 +8,16 @@
 /**
  * Startup the system. Enable clock and timers
  */
-void system_enable(void);
+void system_setup(void);
 
 /**
  * Get the current system ticks, measured in milliseconds
  */
 uint64_t system_get_ms(void);
 
-// DO NOT Call this
-void sys_tick_handler(void);
+/**
+ * Blocking delay in ms
+ */
+void system_delay(size_t ms);
 
 #endif /* BC875EB7_F88A_4063_8E40_26D495BDC53F */

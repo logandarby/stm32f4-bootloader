@@ -13,6 +13,11 @@
         "interface/stlink.cfg",
         "target/stm32f4x.cfg"
       ],
+      "symbolFiles": [
+        {
+          "file": "${workspaceFolder}/bootloader/bootloader.elf"
+        }
+      ],
       "gdbPath": "gdb-multiarch",
       "runToEntryPoint": "main",
       "preLaunchTask": "build",

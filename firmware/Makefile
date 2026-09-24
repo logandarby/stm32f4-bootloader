@@ -25,8 +25,8 @@ ARCH_FLAGS      = -mthumb -mcpu=cortex-m4 $(FP_FLAGS)
 # Linkerscript
 
 LDSCRIPT        = linkerscript.ld
-LDLIBS          += -l$(LIBNAME)
 LDLIBS          += -lcommon
+LDLIBS          += -l$(LIBNAME)
 LDFLAGS         += -L$(OPENCM3_DIR)/lib
 LDFLAGS					+= -L$(COMMON_DIR)
 
@@ -51,7 +51,7 @@ OBJCOPY         := $(PREFIX)objcopy
 OBJDUMP         := $(PREFIX)objdump
 GDB             := $(PREFIX)gdb
 STFLASH         := $(shell which st-flash)
-OPT             := -Os
+OPT             := -O0
 DEBUG           := -ggdb3
 CSTD            ?= -std=c99
 

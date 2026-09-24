@@ -1,6 +1,7 @@
 #include "system.h"
 
 #include <libopencm3/cm3/cortex.h>
+#include <libopencm3/cm3/nvic.h>
 #include <libopencm3/cm3/systick.h>
 #include <libopencm3/stm32/rcc.h>
 
@@ -28,7 +29,7 @@ static void clock_setup(void) {
   rcc_clock_setup_pll(&rcc_hsi_configs[RCC_CLOCK_3V3_84MHZ]);
 }
 
-void system_enable(void) {
+void system_setup(void) {
   clock_setup();
   setup_systick();
 }
@@ -38,4 +39,13 @@ uint64_t system_get_ms(void) {
   uint64_t ticks = system_ms;
   (void)cm_mask_interrupts(mask);
   return ticks;
+}
+
+void system_delay(size_t ms) {
+  uint64_t start_time = system_get_ms();
+  while (1) {
+    if (system_get_ms() - start_time >= ms) {
+      break;
+    }
+  }
 }
