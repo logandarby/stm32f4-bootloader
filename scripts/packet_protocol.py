@@ -191,10 +191,10 @@ class PacketProtocolHost:
             self.retx_counter = 0
 
             if pkt.is_ack():
-                self.logger.info("[RX] ACK received from Target.")
+                self.logger.debug("[RX] ACK received from Target.")
                 return None
 
-            self.logger.info(f"[RX DATA] {self._describe_packet(pkt)}")
+            self.logger.debug(f"[RX DATA] {self._describe_packet(pkt)}")
             self.send_packet(Packet.make_ack())
             return pkt
 

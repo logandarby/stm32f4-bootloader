@@ -34,6 +34,12 @@
 #define SYNC_SEQ_2 (0xC5)
 #define SYNC_SEQ_3 (0xC7)
 
-void firmware_transfer(void);
+/**
+ * Initializes a firmware transfer as defined in DOCS
+ * Idles and blocks the application until a sync sequence is sent. Then the
+ * firmware transfer sequence is initiated, and times out after value
+ * FW_DEFAULT_TIMEOUT
+ */
+void firmware_transfer_start(void);
 
 #endif /* BFDFD9C4_F3DC_4464_8255_CF8F65B127F8 */

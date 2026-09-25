@@ -5,27 +5,27 @@
 
 #include "common.h"
 #include "firmware-transfer.h"
+#include "inbuilt-button.h"
+#include "led.h"
 #include "packet-transfer.h"
 #include "system.h"
 #include "uart.h"
 
 static NORETURN void jump_to_main(void) {
-  // const uint32_t mask = cm_mask_interrupts(1);
-  SCB_VTOR = FIRMWARE_START_ADDR;
-  vector_table_t* vector_table_l = (vector_table_t*)FIRMWARE_START_ADDR;
-  // Set MSP Register
+  __asm__ volatile("cpsid i" : : : "memory");
+  vector_table_t* target_vectors = (vector_table_t*)FIRMWARE_START_ADDR;
+  uint32_t app_sp = (uint32_t)target_vectors->initial_sp_value;
+  void (*app_reset_handler)(void) = target_vectors->reset;
   __asm__ volatile(
-      "msr msp, %0 \n"  // set the msp
-      "isb \n"          // instr sync barrier
+      "msr msp, %0 \n"
+      "isb         \n"
+      "bx  %1      \n"
       :
-      : "r"(vector_table_l->initial_sp_value)
+      : "r"(app_sp), "r"(app_reset_handler)
       : "memory");
-  // (void)cm_mask_interrupts(mask);
-  // Setup vector table
-  vector_table_l->reset();
   while (1) {
-    // Reset should never return, but in case it does we spin
-  };
+    // Spin lock fallback
+  }
 }
 
 NORETURN int main(void) {
@@ -33,9 +33,18 @@ NORETURN int main(void) {
   system_setup();
   uart_setup();
   packet_setup();
+  inbuilt_button_setup();
+  led_setup();
 
-  firmware_transfer();
+  // Firmware transfer mode only initiates if button is pressed
+  if (inbuilt_button_is_pressed()) {
+    led_set(LedState_ON);
+    firmware_transfer_start();
+    led_set(LedState_OFF);
+  }
 
+  inbuilt_button_teardown();
+  led_teardown();
   uart_teardown();
   system_teardown();
 

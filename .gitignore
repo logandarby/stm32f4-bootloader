@@ -5,4 +5,7 @@
 *.elf
 *.map
 
+*.venv
+*__pycache__
+
 hardware_docs

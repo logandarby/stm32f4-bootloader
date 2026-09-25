@@ -1,28 +1,85 @@
-Here is your updated Markdown document with the **UART** section filled out to accurately document your peripheral setup:
-
 # Bootloader Documentation
+
+## How to Initiate a Transfer
+
+1. First, plug in the STM32F4 while holding down the blue pushbutton (B1). Instead of running the main firmware, this will power on the device in firmware transfer mode. The green LED should turn on, and the chip will idle.
+2. Run the python script `firmware_transfer_host.py` with the desired bin file on the desired usb port. 
+3. That's it!
+
+Be sure that the binary file follows the specifications in [Target Firmware Requirements](#target-firmware-requirements).
 
 ## Preliminary Information
 
+* **C Standard:** C99
+* **Bootloader Size:** 32 KiB
+* **Bootloader Start Addr:** `0x0800 0000`
+* **Bootloader End Addr:** `0x0800 7FFF`
 
-* C Standard: C99
-* Size: 32KiB
-* Start Addr: `0x0800 0000`
-* End Addr: `0x0800 7FFF`
+The bootloader resides in the first two sectors of flash memory (`0x0800 0000` – `0x0800 7FFF`). The application firmware resides in sectors 2–7 from addresses `0x0800 8000` to `0x0807 FFFF`.
 
-The bootloader lives in the first two sectors of flash memory. The firmware lives in sectors (2 - 7) from addresses `0x0800 8000` - `0x0807 FFFF`.
+---
+
+## Target Firmware Requirements
+
+Application binaries uploaded via this bootloader must be specifically configured during compilation to run at the allocated offset.
+
+### 1. Linker Script (`.ld`) Configuration
+
+* **Flash Origin:** Must be set to `0x0800 8000`.
+* **Flash Size:** Maximum `480 KiB` (`0x0007 8000` bytes).
+
+```ld
+MEMORY
+{
+  /* First 32 KiB reserved for bootloader */
+  FLASH (rx)  : ORIGIN = 0x08008000, LENGTH = 480K
+  RAM   (rwx) : ORIGIN = 0x20000000, LENGTH = 128K
+}
+
+```
+
+### 2. Binary File Output Format
+
+* The payload binary sent to the host flasher must be a raw binary
+* File offset `0x00000000` in the `.bin` file must directly correspond to Flash address `0x08008000`
+
+### 3. Vector Table Relocation (`VTOR`)
+
+C startup might reset SCB_VTOR, so the `main` function must relocate it to its vector table. For example, using `libopencm3`
+
+
+```c
+#include <libopencm3/stm32/memorymap.h>
+
+#define BOOTLOADER_SIZE (0x8000U)
+#define FIRMWARE_START_ADDR (FLASH_BASE + BOOTLOADER_SIZE)
+
+int main(void) {
+    SCB_VTOR = FIRMWARE_START_ADDR;
+    // ... Rest of the application
+}
+
+```
+
+### 4. Word / Double-Word Alignment
+
+Flash programming hardware requires writes to be word-aligned (32-bit or 64-bit depending on the target STM32 series). The host flasher and flash driver automatically pad the payload buffer to maintain proper word alignment prior to invoking `bl_flash_write()`.
+
+---
 
 ## Firmware Update Mechanism
 
-The following protocol layers are used. Custom protocols are elaborated in [Custom Protocols](https://www.google.com/search?q=%2523custom-protocols&utm_source=gemini)
+The system uses three protocol layers:
 
-* Layer 0: UART
-* Layer 1: [Packet Transfer](https://www.google.com/search?q=%2523packet-transfer&utm_source=gemini)
-* Layer 2: [Firmware Transfer](https://www.google.com/search?q=%2523firmware-transfer&utm_source=gemini)
+* **Layer 0:** UART Physical Transport
+* **Layer 1:** Packet Transfer Protocol (Framing, CRC8, ReTx, Link-Layer ACKs)
+* **Layer 2:** Firmware Transfer Protocol (Application-Layer Flow Control & Flash Programming)
+
+---
 
 ## Protocol Specifications & Definitions
 
-### UART
+### UART (Layer 0)
 
 The physical layer uses standard 8N1 asynchronous serial communication operating on STM32 **USART2**.
 
@@ -38,14 +95,17 @@ The physical layer uses standard 8N1 asynchronous serial communication operating
 | RX Mechanism | Interrupt-driven (`USART2_IRQ`) into a 128-byte software ring buffer |
 | TX Mechanism | Polled / Blocking (`usart_send_blocking`) |
 
-### Packet Transfer
+---
+
+### Packet Transfer (Layer 1)
 
 Packets are **19 bytes** total and sent over the UART stream using the following structure:
 
 * **Byte 0:** Start of Frame (SOF) Sentinel (`0xAA`)
 * **Byte 1:** Control & Length Header Byte
-    * **Bits [7:4] (Upper Nibble):** Control Flags
-    * **Bits [3:0] (Lower Nibble):** Payload Length minus 1 (`0x0` to `0xF` representing 1 to 16 bytes)
+* **Bits [7:4] (Upper Nibble):** Control Flags
+* **Bits [3:0] (Lower Nibble):** Payload Length minus 1 (`0x0` to `0xF` representing 1 to 16 bytes)
+
 
 * **Bytes 2–17:** Data Payload (16 bytes, padded with `0xFF` if payload length is smaller)
 * **Byte 18:** CRC8 (Calculated over Bytes 1–17: Header + Data)
@@ -54,21 +114,11 @@ Packets are **19 bytes** total and sent over the UART stream using the following
 
 | Nibble Value | Flag | Description |
 | --- | --- | --- |
-| `0x00` | NONE | Standard Data Packet |
-| `0x10` | ACK | Acknowledge Packet |
-| `0x20` | ReTx | Request Retransmit Packet |
+| `0x00` | `NONE` | Standard Data Packet |
+| `0x10` | `ACK` | Link-layer Acknowledge Packet (Confirms RX buffer entry) |
+| `0x20` | `ReTx` | Request Retransmit Packet |
 
-#### Constants & Parameters
-
-| Byte / Parameter | Value | Description |
-| --- | --- | --- |
-| `SOF` | `0xAA` | Start of Frame Sync Marker |
-| Data Bytes Padding | `0xFF` | Padding used to fill unused slots in the 16-byte data buffer |
-| Max ReTx Attempts | `3` | Maximum consecutive retransmit attempts allowed before aborting |
-
-#### Protocol State Machine
-
-The following state machine diagram represents the frame synchronization and processing pipeline used over UART:
+#### Packet State Machine
 
 ```mermaid
 flowchart TD
@@ -100,45 +150,80 @@ flowchart TD
 
 ```
 
-### Firmware Transfer
+---
 
-The following state machine diagram represents the protocol for the user and hardware initiating a firmware transfer and update.
+### Firmware Transfer (Layer 2)
+
+Layer 2 governs the application handshake, flash erasure, and data transfer.
+
+- The sequence starts when a specific UART sequence is transmitted. Then, the protocol switches to using the packet protocol.
+- The packet protocol is defined in the state machine in [Firmware Protocol State Machine](#firmware-protocol-state-machine)
+- The sentinel values are sent as 1 byte packets, and whose values are defined in [Sentinel Packet Values](#firmware-protocol-sentinel-packet-values)
+
+#### Firmware Protocol Sentinel Packet Values
+
+| Macro Name | Hex Value | Total Payload Length | Bytes Following Sentinel | Description |
+| --- | --- | --- | --- | --- |
+| `SYNC_SEQ_0` | `0xC1` | 1 Byte | None | Sync byte 0 sent by host |
+| `SYNC_SEQ_1` | `0xC3` | 1 Byte | None | Sync byte 1 sent by host |
+| `SYNC_SEQ_2` | `0xC5` | 1 Byte | None | Sync byte 2 sent by host |
+| `SYNC_SEQ_3` | `0xC7` | 1 Byte | None | Sync byte 3 sent by host |
+| `FW_BYTE_SEQ_OBSERVED` | `0xA1` | 1 Byte | None | Target acknowledges valid sync sequence |
+| `FW_BYTE_UPDATE_REQ` | `0xA2` | 1 Byte | None | Host requests firmware update |
+| `FW_BYTE_UPDATE_RES` | `0xA3` | 1 Byte | None | Target accepts firmware update request |
+| `FW_BYTE_DEVICE_ID_REQ` | `0xA4` | 1 Byte | None | Target requests device ID verification |
+| `FW_BYTE_DEVICE_ID_RES` | `0xA5` | 2 Bytes | 1 Byte (`uint8_t` Device ID) | Host sends device ID (e.g., `0x14`) |
+| `FW_BYTE_FW_LEN_REQ` | `0xA6` | 1 Byte | None | Target requests firmware payload size |
+| `FW_BYTE_FW_LEN_RES` | `0xA7` | 5 Bytes | 4 Bytes (`uint32_t` Firmware Size) | Host sends total binary size in bytes |
+| `FW_BYTE_READY` | `0xA8` | 1 Byte | None | Target confirms chunk flash write complete (ready for next chunk) |
+| `FW_BYTE_FW_UPDATE_SUCCESSFUL` | `0xA9` | 1 Byte | None | Target confirms entire image verified and written to flash |
+| `FW_BYTE_NACK` | `0xAB` | 1 Byte | None | Negative acknowledgment / general protocol error signal |
+
+#### Firmware Protocol Constants
+
+The following are other important constants in relation to the firmware update mechanism
+
+| Constant Name | Value | Description | 
+| --- | --- | --- |
+| `FW_DEFAULT_TIMEOUT_MS` | `3000U` | The timeout in milliseconds of each transfer protocol wait state, with the exception of the sync state, which idles forever. |
+| `FW_ERASE_TIMEOUT_S` | `15U` | The timeout in milliseconds of the host waiting for the flash to erase. | 
+| `DEVICE_ID` | `0x14` | This defines the target device you wish to update. For an STM32F4, this is the appropriate ID. | 
+
+#### Firmware Protocol State Machine
 
 ```mermaid
-flowchart LR
-    START([Wait for sync])
+flowchart TD
+    START([Bootloader Boot]) --> SYNC[Wait for Sync Sequence]
 
-    START --> SYNC[Send synced message]
-    SYNC --> SYNC_OK{Sync acknowledged?}
+    SYNC --> SYNC_OK{Sync Handshake<br/>Successful?}
+    SYNC_OK -->|No / Timeout| JUMP([Jump to Application])
 
-    SYNC_OK -->|Yes| UPDATE_REQ[Wait for firmware update request]
-    SYNC_OK -->|No / Timeout| SYNC_FAIL[Sync failed]
-    SYNC_FAIL --> MAIN([Jump to main application])
+    SYNC_OK -->|Yes| SEND_SYNC_ACK[Send FW_BYTE_SEQ_OBSERVED]
+    SEND_SYNC_ACK --> WAIT_REQ[Wait for Update Request]
 
-    UPDATE_REQ --> UPDATE_MSG{Update request received?}
-    UPDATE_MSG -->|Yes| DEVICE_REQ[Request firmware device ID]
-    UPDATE_MSG -->|No / Timeout| UPDATE_FAIL[Update request timeout]
-    UPDATE_FAIL --> MAIN
+    WAIT_REQ --> REQ_OK{Request Received?}
+    REQ_OK -->|No / Timeout| JUMP
+    
+    REQ_OK -->|Yes| REQ_DEV[Send Device ID Request]
+    REQ_DEV --> DEV_OK{Device ID Valid?}
+    DEV_OK -->|No / Mismatch| JUMP
 
-    DEVICE_REQ --> DEVICE_ID{Device ID matches?}
-    DEVICE_ID -->|Yes| LENGTH_REQ[Request firmware length]
-    DEVICE_ID -->|No / Timeout| DEVICE_FAIL[Device ID mismatch]
-    DEVICE_FAIL --> MAIN
+    DEV_OK -->|Yes| REQ_LEN[Send Length Request]
+    REQ_LEN --> LEN_OK{Length Valid &<br/><= 480 KiB?}
+    LEN_OK -->|No / Timeout| JUMP
 
-    LENGTH_REQ --> LENGTH_RX{Firmware length received?}
-    LENGTH_RX -->|Yes| LENGTH_VALID{Firmware size valid?}
-    LENGTH_RX -->|No / Timeout| LENGTH_FAIL[Failed to receive firmware length]
-    LENGTH_FAIL --> MAIN
+    LEN_OK -->|Yes| ERASE[Erase Flash Sectors 2-7]
+    ERASE --> RECV_CHUNK[Receive Data Chunk]
 
-    LENGTH_VALID -->|Yes| RECEIVE[Receive firmware]
-    LENGTH_VALID -->|No / Timeout| SIZE_FAIL[Firmware too large]
-    SIZE_FAIL --> MAIN
+    RECV_CHUNK --> WRITE_FLASH[Write Payload to Flash &<br/>Update fw_bytes_written]
+    
+    WRITE_FLASH --> CHUNK_CHECK{fw_bytes_written<br/>>= fw_length?}
+    
+    CHUNK_CHECK -->|No| SEND_READY[Send FW_BYTE_READY]
+    SEND_READY --> RECV_CHUNK
 
-    RECEIVE --> FW_VALID{Firmware transfer valid?}
-    FW_VALID -->|Yes| COMPLETE[Firmware update complete]
-    FW_VALID -->|No / Timeout| FW_FAIL[Firmware transfer failed]
-    FW_FAIL --> MAIN
-
-    COMPLETE --> MAIN
+    CHUNK_CHECK -->|Yes| SEND_SUCCESS[Send FW_BYTE_FW_UPDATE_SUCCESSFUL]
+    SEND_SUCCESS --> FLUSH_UART[Wait for UART TX Complete]
+    FLUSH_UART --> JUMP
 
 ```

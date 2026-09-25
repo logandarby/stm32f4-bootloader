@@ -49,7 +49,7 @@ static bool fw_is_fw_len_packet(const packet_t* packet) {
          packet->data[0] == FW_BYTE_FW_LEN_RES;
 }
 
-void firmware_transfer(void) {
+void firmware_transfer_start(void) {
   // Reset session variables
   fw_state = FWState_SYNC;
   fw_length = 0;
@@ -58,7 +58,10 @@ void firmware_transfer(void) {
   timer_init(&timeout, FW_DEFAULT_TIMEOUT_MS, false);
 
   while (fw_state != FWState_DONE) {
-    check_timeout();
+    // Idle until sync observed
+    if (fw_state != FWState_SYNC) {
+      check_timeout();
+    }
 
     if (fw_state == FWState_SYNC) {
       if (uart_is_data_available()) {
@@ -179,13 +182,16 @@ void firmware_transfer(void) {
         bl_flash_write(FIRMWARE_START_ADDR + fw_bytes_written,
                        fw_packet_buffer.data, bytes_to_write);
 
-        fw_bytes_written += packet_len;
+        fw_bytes_written += bytes_to_write;
 
         if (fw_bytes_written >= fw_length) {
           packet_create_single_byte(&fw_packet_buffer,
                                     FW_BYTE_FW_UPDATE_SUCCESSFUL);
           (void)packet_send(&fw_packet_buffer);
           fw_state = FWState_DONE;
+        } else {
+          packet_create_single_byte(&fw_packet_buffer, FW_BYTE_READY);
+          (void)packet_send(&fw_packet_buffer);
         }
       } break;
 
@@ -193,7 +199,7 @@ void firmware_transfer(void) {
         continue;
 
       default:
-        fw_state = FWState_SYNC;
+        fw_state = FWState_DONE;
         break;
     }
   }
