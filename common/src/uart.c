@@ -50,6 +50,17 @@ void uart_setup(void) {
   usart_enable(USART2);
 }
 
+void uart_teardown(void) {
+  uart_wait_for_tc();
+  usart_disable_rx_interrupt(USART2);
+  nvic_disable_irq(NVIC_USART2_IRQ);
+  usart_disable(USART2);
+  rcc_periph_clock_disable(RCC_GPIOA);
+  rcc_periph_clock_disable(RCC_USART2);
+  gpio_mode_setup(UART_PORT, GPIO_MODE_ANALOG, GPIO_PUPD_NONE,
+                  UART_PIN_TX | UART_PIN_RX);
+}
+
 bool uart_is_data_available(void) {
   return !rb_is_empty(&uart_ringbuffer);
 }
@@ -83,4 +94,8 @@ size_t uart_read(uint8_t* byte_buffer, size_t buffer_len) {
     }
   }
   return buffer_len;
+}
+
+void uart_wait_for_tc(void) {
+  while (!usart_get_flag(USART2, USART_SR_TC));
 }

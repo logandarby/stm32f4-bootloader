@@ -6,7 +6,11 @@
 typedef struct {
   void (*callback)(void);
   uint32_t interval_ms;
-  bool disabled;  // Change to either enable or disable a task
+
+  // Optional
+  bool disabled;   // Change to either enable or disable a task
+  bool singleton;  // If set to true, the task will only run once, and then
+                   // set itself to disabled
 
   // Private fields
   uint32_t last_run_ms;  // Defaults to 0

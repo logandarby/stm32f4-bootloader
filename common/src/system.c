@@ -29,6 +29,14 @@ static void clock_setup(void) {
   rcc_clock_setup_pll(&rcc_hsi_configs[RCC_CLOCK_3V3_84MHZ]);
 }
 
+void system_teardown(void) {
+  system_ms = 0;
+  systick_counter_disable();
+  systick_interrupt_disable();
+  cm_disable_interrupts();
+  systick_clear();
+}
+
 void system_setup(void) {
   clock_setup();
   setup_systick();

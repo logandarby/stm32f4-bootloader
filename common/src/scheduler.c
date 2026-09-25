@@ -18,6 +18,9 @@ NORETURN void scheduler_run(task_t* tasks, size_t tasks_len) {
       if (current_time - task->last_run_ms >= task->interval_ms) {
         task->last_run_ms = current_time;
         task->callback();
+        if (task->singleton) {
+          task->disabled = true;
+        }
       }
     }
   }

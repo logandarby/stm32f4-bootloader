@@ -43,12 +43,21 @@ static void packet_reset_rx_state(void) {
   data_byte_count = 0;
 }
 
+void packet_create_single_byte(packet_t* packet, uint8_t byte) {
+  packet->data[0] = byte;
+  packet_init(packet, 1);
+}
+
+bool packet_is_single_byte(const packet_t* packet, uint8_t byte) {
+  return packet_get_ctrl(packet) == PACKET_CTRL_NONE &&
+         packet_get_data_length(packet) == 1 && packet->data[0] == byte;
+}
+
 void packet_init(packet_t* packet, size_t data_len) {
   packet->sof = PACKET_SOF_BYTE;
   packet->header = PACKET_LEN_MASK & (data_len - 1);
-  for (size_t i = data_len; i < PACKET_DATA_LEN; i++) {
-    packet->data[i] = PACKET_BYTE_PADDING;
-  }
+  memset(packet->data + data_len, PACKET_BYTE_PADDING,
+         PACKET_DATA_LEN - data_len);
   packet->crc = packet_compute_crc(packet);
 }
 
@@ -183,4 +192,12 @@ uint8_t packet_compute_crc(const packet_t* packet) {
   memcpy(&header_and_data[1], packet->data, PACKET_DATA_LEN);
 
   return crc8(header_and_data, sizeof(header_and_data));
+}
+
+uint8_t packet_get_data_length(const packet_t* packet) {
+  return (packet->header & PACKET_LEN_MASK) + 1;
+}
+
+uint8_t packet_get_ctrl(const packet_t* packet) {
+  return packet->header & PACKET_CTRL_MASK;
 }

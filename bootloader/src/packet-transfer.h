@@ -40,6 +40,11 @@ typedef struct {
 } packet_t;
 PACKED_STRUCT_END
 
+typedef enum {
+  PacketSpecialType_RETX = PACKET_CTRL_RETX,
+  PacketSpecialType_ACK = PACKET_CTRL_ACK,
+} PacketSpecialType;
+
 /**
  * Sets up for packet receiving
  * Requires: uart_setup() has been called
@@ -52,6 +57,17 @@ void packet_setup(void);
  * packet like ACK or RETX
  */
 void packet_init(packet_t* packet, size_t data_len);
+
+/**
+ * Creates a valid packet with a single byte payload as specified in byte
+ * Copies the packet into `packet`
+ */
+void packet_create_single_byte(packet_t* packet, uint8_t byte);
+
+/**
+ * Checks if the packet contains a single byte, which is `byte`
+ */
+bool packet_is_single_byte(const packet_t* packet, uint8_t byte);
 
 /**
  * Updates the packet state machine. Call at a poll rate.
@@ -80,6 +96,16 @@ bool packet_send(const packet_t* packet);
  * fields).
  */
 uint8_t packet_compute_crc(const packet_t* packet);
+
+/**
+ * Get the length of the data inside the packet in bytes
+ */
+uint8_t packet_get_data_length(const packet_t* packet);
+
+/**
+ * Get the ctrl bits of the packet
+ */
+uint8_t packet_get_ctrl(const packet_t* packet);
 
 /**
  * Helper to extract actual payload length (1..16) from packet header.

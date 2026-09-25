@@ -6,9 +6,15 @@
 #define SYS_TICK_FREQ_HZ (1000)
 
 /**
- * Startup the system. Enable clock and timers
+ * Startup the system. Enable clock and timers.
+ * Must call system teardown after
  */
 void system_setup(void);
+
+/**
+ * Resets system to default
+ */
+void system_teardown(void);
 
 /**
  * Get the current system ticks, measured in milliseconds
