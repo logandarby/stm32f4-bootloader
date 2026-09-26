@@ -40,6 +40,8 @@ SECTIONS
 		KEEP (*(.bootloader_section))	/* Bootloader */
 		. = ORIGIN(rom) + 0x8000;
 		*(.vectors)	/* Vector table */
+		KEEP (*(.firmware_info))	/* Firmware specific info to store on device during transfer  */
+		
 		*(.text*)	/* Program code */
 		. = ALIGN(4);
 		*(.rodata*)	/* Read-only data */

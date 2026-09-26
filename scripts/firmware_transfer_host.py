@@ -19,12 +19,19 @@ from packet_protocol import (
     console,
     setup_logging,
 )
+from patch_firmware import (
+    patch_firmware,
+    FirmwareSizeError,
+    InvalidSentinelError,
+    InvalidDeviceIdError,
+)
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeRemainingColumn
 
 # Protocol Constants matching firmware-transfer.h
 FW_DEFAULT_TIMEOUT_S = 3.0
 FW_ERASE_TIMEOUT_S = 15.0
 DEFAULT_DEVICE_ID = 0x14
+FIRMWARE_VERSION_NUMER = 0x00010000
 
 # Sentinel Bytes
 FW_BYTE_SEQ_OBSERVED = 0xA1
@@ -116,6 +123,11 @@ class FirmwareTransferHost(PacketProtocolHost):
         device_id: int = DEFAULT_DEVICE_ID,
         skip_sync: bool = False,
     ) -> None:
+        
+        self.logger.info(f"Injecting Firmware with Firmware Info")
+        firmware_bytes, _ = patch_firmware(bytearray(firmware_bytes), device_id=DEFAULT_DEVICE_ID, version=0x00010000)
+
+        
         fw_len = len(firmware_bytes)
         self.logger.info(f"Beginning Firmware Transfer Protocol (Size: {fw_len} bytes)")
 

@@ -11,9 +11,6 @@
 // Constants
 #define FW_DEFAULT_TIMEOUT_MS (3000U)
 #define FW_MAX_FW_LEN (FLASH_SIZE - BOOTLOADER_SIZE)
-// TODO: Put this in a better location?
-#define DEVICE_ID \
-  (0x14U)  // Device ID to make sure correct device is being queried
 
 // Sentinel Bytes for comms
 #define FW_BYTE_SEQ_OBSERVED (0xA1U)

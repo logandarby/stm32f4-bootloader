@@ -1,6 +1,7 @@
 #include "firmware-transfer.h"
 
-#include "bl-flash.h"
+#include "bl_flash.h"
+#include "fw_info.h"
 #include "packet-transfer.h"
 #include "timer.h"
 #include "uart.h"

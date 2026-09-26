@@ -1,5 +1,26 @@
 # Bootloader Documentation
 
+- [How to Initiate a Transfer](#how-to-initiate-a-transfer)
+- [Preliminary Information](#preliminary-information)
+- [Target Firmware Requirements](#target-firmware-requirements)
+  - [Linker Script (`.ld`) Configuration](#linker-script-ld-configuration)
+  - [Binary File Output Format](#binary-file-output-format)
+  - [Vector Table Relocation (`VTOR`)](#vector-table-relocation-vtor)
+  - [Firmware Info Section](#firmware-info-section)
+  - [Word / Double-Word Alignment](#word--double-word-alignment)
+- [Firmware Update Mechanism](#firmware-update-mechanism)
+- [Protocol Specifications \& Definitions](#protocol-specifications--definitions)
+  - [UART (Layer 0)](#uart-layer-0)
+  - [Packet Transfer (Layer 1)](#packet-transfer-layer-1)
+    - [Header Control Nibble Definitions](#header-control-nibble-definitions)
+    - [Packet State Machine](#packet-state-machine)
+  - [Firmware Transfer (Layer 2)](#firmware-transfer-layer-2)
+    - [Firmware Protocol Sentinel Packet Values](#firmware-protocol-sentinel-packet-values)
+    - [Firmware Protocol Constants](#firmware-protocol-constants)
+    - [Firmware Protocol State Machine](#firmware-protocol-state-machine)
+- [Firmware Integrity](#firmware-integrity)
+
+
 ## How to Initiate a Transfer
 
 1. First, plug in the STM32F4 while holding down the blue pushbutton (B1). Instead of running the main firmware, this will power on the device in firmware transfer mode. The green LED should turn on, and the chip will idle.
@@ -23,10 +44,12 @@ The bootloader resides in the first two sectors of flash memory (`0x0800 0000` â
 
 Application binaries uploaded via this bootloader must be specifically configured during compilation to run at the allocated offset.
 
-### 1. Linker Script (`.ld`) Configuration
+### Linker Script (`.ld`) Configuration
 
 * **Flash Origin:** Must be set to `0x0800 8000`.
 * **Flash Size:** Maximum `480 KiB` (`0x0007 8000` bytes).
+
+Notice a `.firmware_info` section. This is expanded on more in [Firmware Info Section](#firmware-info-section).
 
 ```ld
 MEMORY
@@ -36,14 +59,24 @@ MEMORY
   RAM   (rwx) : ORIGIN = 0x20000000, LENGTH = 128K
 }
 
+SECTIONS
+{
+	.text : {
+		*(.vectors)	/* Vector table */
+		KEEP (*(.firmware_info))	/* Firmware specific info to store on device during transfer  */
+		
+        /* ... Rest of firmware ... */
+    }
+}
+
 ```
 
-### 2. Binary File Output Format
+### Binary File Output Format
 
 * The payload binary sent to the host flasher must be a raw binary
 * File offset `0x00000000` in the `.bin` file must directly correspond to Flash address `0x08008000`
 
-### 3. Vector Table Relocation (`VTOR`)
+### Vector Table Relocation (`VTOR`)
 
 C startup might reset SCB_VTOR, so the `main` function must relocate it to its vector table. For example, using `libopencm3`
 
@@ -61,7 +94,26 @@ int main(void) {
 
 ```
 
-### 4. Word / Double-Word Alignment
+### Firmware Info Section
+
+After the vector table, the program must contain a `firmware_info_t` struct with certain fields set. This is then linked in the linker script as `.firmware_info`, and goes after the vector table. Some fields will be dynamically populated on transfer. Below is a table describing the struct. An example can be found in `firmware/src/info.c`.
+
+All uninitialized fields must be set to padding bytes `0xFFFFFFFF`.
+
+| Field      | Description                                                                                                                                                                                                                                                               | Must be populated in firmware?                                       |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| sentinel   | A sentinel used internally to detect the structure prescence                                                                                                                                                                                                              | Yes. Must be 0xC0FFEE00                                              |
+| device_id  | The device ID the firmware wishes to target                                                                                                                                                                                                                               | Yes. Must be the target device ID (Default for this purpose is 0x41) |
+| version    | Version number of the firmware                                                                                                                                                                                                                                            | No                                                                   |
+| length     | Length of the firmware minus the vector table and minus the firmware info                                                                                                                                                                                                 | No                                                                   |
+| _reserved0 | Reserved for future use                                                                                                                                                                                                                                                   | No - Pad to 0xFFFFFFFF                                               |
+| _reserved1 | Reserved for future use                                                                                                                                                                                                                                                   | No - Pad to 0xFFFFFFFF                                               |
+| _reserved2 | Reserved for future use                                                                                                                                                                                                                                                   | No - Pad to 0xFFFFFFFF                                               |
+| _reserved3 | Reserved for future use                                                                                                                                                                                                                                                   | No - Pad to 0xFFFFFFFF                                               |
+| _reserved4 | Reserved for future use                                                                                                                                                                                                                                                   | No - Pad to 0xFFFFFFFF                                               |
+| crc32      | A CRC32 value for an integrity check of the firmware. It is caculated with the bytes of the firmware image minus those in the vector table and minus those in the firmware info section. The CRC is calculated using the internal CRC peripheral of the STM32F401RE chip. | No                                                                   |
+
+### Word / Double-Word Alignment
 
 Flash programming hardware requires writes to be word-aligned (32-bit or 64-bit depending on the target STM32 series). The host flasher and flash driver automatically pad the payload buffer to maintain proper word alignment prior to invoking `bl_flash_write()`.
 
@@ -83,17 +135,17 @@ The system uses three protocol layers:
 
 The physical layer uses standard 8N1 asynchronous serial communication operating on STM32 **USART2**.
 
-| Parameter | Configuration |
-| --- | --- |
-| Baud Rate | 115200 bps |
-| Data Bits | 8 |
-| Parity | None |
-| Stop Bits | 1 |
-| Total Bits | 10 |
-| Flow Control | None |
-| Pin Mapping | TX: PA2, RX: PA3 (Alternate Function AF7) |
+| Parameter    | Configuration                                                        |
+| ------------ | -------------------------------------------------------------------- |
+| Baud Rate    | 115200 bps                                                           |
+| Data Bits    | 8                                                                    |
+| Parity       | None                                                                 |
+| Stop Bits    | 1                                                                    |
+| Total Bits   | 10                                                                   |
+| Flow Control | None                                                                 |
+| Pin Mapping  | TX: PA2, RX: PA3 (Alternate Function AF7)                            |
 | RX Mechanism | Interrupt-driven (`USART2_IRQ`) into a 128-byte software ring buffer |
-| TX Mechanism | Polled / Blocking (`usart_send_blocking`) |
+| TX Mechanism | Polled / Blocking (`usart_send_blocking`)                            |
 
 ---
 
@@ -112,11 +164,11 @@ Packets are **19 bytes** total and sent over the UART stream using the following
 
 #### Header Control Nibble Definitions
 
-| Nibble Value | Flag | Description |
-| --- | --- | --- |
-| `0x00` | `NONE` | Standard Data Packet |
-| `0x10` | `ACK` | Link-layer Acknowledge Packet (Confirms RX buffer entry) |
-| `0x20` | `ReTx` | Request Retransmit Packet |
+| Nibble Value | Flag   | Description                                              |
+| ------------ | ------ | -------------------------------------------------------- |
+| `0x00`       | `NONE` | Standard Data Packet                                     |
+| `0x10`       | `ACK`  | Link-layer Acknowledge Packet (Confirms RX buffer entry) |
+| `0x20`       | `ReTx` | Request Retransmit Packet                                |
 
 #### Packet State Machine
 
@@ -162,32 +214,32 @@ Layer 2 governs the application handshake, flash erasure, and data transfer.
 
 #### Firmware Protocol Sentinel Packet Values
 
-| Macro Name | Hex Value | Total Payload Length | Bytes Following Sentinel | Description |
-| --- | --- | --- | --- | --- |
-| `SYNC_SEQ_0` | `0xC1` | 1 Byte | None | Sync byte 0 sent by host |
-| `SYNC_SEQ_1` | `0xC3` | 1 Byte | None | Sync byte 1 sent by host |
-| `SYNC_SEQ_2` | `0xC5` | 1 Byte | None | Sync byte 2 sent by host |
-| `SYNC_SEQ_3` | `0xC7` | 1 Byte | None | Sync byte 3 sent by host |
-| `FW_BYTE_SEQ_OBSERVED` | `0xA1` | 1 Byte | None | Target acknowledges valid sync sequence |
-| `FW_BYTE_UPDATE_REQ` | `0xA2` | 1 Byte | None | Host requests firmware update |
-| `FW_BYTE_UPDATE_RES` | `0xA3` | 1 Byte | None | Target accepts firmware update request |
-| `FW_BYTE_DEVICE_ID_REQ` | `0xA4` | 1 Byte | None | Target requests device ID verification |
-| `FW_BYTE_DEVICE_ID_RES` | `0xA5` | 2 Bytes | 1 Byte (`uint8_t` Device ID) | Host sends device ID (e.g., `0x14`) |
-| `FW_BYTE_FW_LEN_REQ` | `0xA6` | 1 Byte | None | Target requests firmware payload size |
-| `FW_BYTE_FW_LEN_RES` | `0xA7` | 5 Bytes | 4 Bytes (`uint32_t` Firmware Size) | Host sends total binary size in bytes |
-| `FW_BYTE_READY` | `0xA8` | 1 Byte | None | Target confirms chunk flash write complete (ready for next chunk) |
-| `FW_BYTE_FW_UPDATE_SUCCESSFUL` | `0xA9` | 1 Byte | None | Target confirms entire image verified and written to flash |
-| `FW_BYTE_NACK` | `0xAB` | 1 Byte | None | Negative acknowledgment / general protocol error signal |
+| Macro Name                     | Hex Value | Total Payload Length | Bytes Following Sentinel           | Description                                                       |
+| ------------------------------ | --------- | -------------------- | ---------------------------------- | ----------------------------------------------------------------- |
+| `SYNC_SEQ_0`                   | `0xC1`    | 1 Byte               | None                               | Sync byte 0 sent by host                                          |
+| `SYNC_SEQ_1`                   | `0xC3`    | 1 Byte               | None                               | Sync byte 1 sent by host                                          |
+| `SYNC_SEQ_2`                   | `0xC5`    | 1 Byte               | None                               | Sync byte 2 sent by host                                          |
+| `SYNC_SEQ_3`                   | `0xC7`    | 1 Byte               | None                               | Sync byte 3 sent by host                                          |
+| `FW_BYTE_SEQ_OBSERVED`         | `0xA1`    | 1 Byte               | None                               | Target acknowledges valid sync sequence                           |
+| `FW_BYTE_UPDATE_REQ`           | `0xA2`    | 1 Byte               | None                               | Host requests firmware update                                     |
+| `FW_BYTE_UPDATE_RES`           | `0xA3`    | 1 Byte               | None                               | Target accepts firmware update request                            |
+| `FW_BYTE_DEVICE_ID_REQ`        | `0xA4`    | 1 Byte               | None                               | Target requests device ID verification                            |
+| `FW_BYTE_DEVICE_ID_RES`        | `0xA5`    | 2 Bytes              | 1 Byte (`uint8_t` Device ID)       | Host sends device ID (e.g., `0x14`)                               |
+| `FW_BYTE_FW_LEN_REQ`           | `0xA6`    | 1 Byte               | None                               | Target requests firmware payload size                             |
+| `FW_BYTE_FW_LEN_RES`           | `0xA7`    | 5 Bytes              | 4 Bytes (`uint32_t` Firmware Size) | Host sends total binary size in bytes                             |
+| `FW_BYTE_READY`                | `0xA8`    | 1 Byte               | None                               | Target confirms chunk flash write complete (ready for next chunk) |
+| `FW_BYTE_FW_UPDATE_SUCCESSFUL` | `0xA9`    | 1 Byte               | None                               | Target confirms entire image verified and written to flash        |
+| `FW_BYTE_NACK`                 | `0xAB`    | 1 Byte               | None                               | Negative acknowledgment / general protocol error signal           |
 
 #### Firmware Protocol Constants
 
 The following are other important constants in relation to the firmware update mechanism
 
-| Constant Name | Value | Description | 
-| --- | --- | --- |
+| Constant Name           | Value   | Description                                                                                                                  |
+| ----------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------- |
 | `FW_DEFAULT_TIMEOUT_MS` | `3000U` | The timeout in milliseconds of each transfer protocol wait state, with the exception of the sync state, which idles forever. |
-| `FW_ERASE_TIMEOUT_S` | `15U` | The timeout in milliseconds of the host waiting for the flash to erase. | 
-| `DEVICE_ID` | `0x14` | This defines the target device you wish to update. For an STM32F4, this is the appropriate ID. | 
+| `FW_ERASE_TIMEOUT_S`    | `15U`   | The timeout in milliseconds of the host waiting for the flash to erase.                                                      |
+| `DEVICE_ID`             | `0x14`  | This defines the target device you wish to update. For an STM32F4, this is the appropriate ID.                               |
 
 #### Firmware Protocol State Machine
 
@@ -227,3 +279,8 @@ flowchart TD
     FLUSH_UART --> JUMP
 
 ```
+
+## Firmware Integrity
+
+Multiple layers of error detection are performed in the packet and firmware transfer protocols. However, as a final check, the CRC32 of the firmware image (minus the vector table and minus the firmware info sections) is calculated upon transfer, and stored in the device in the firmware info section (See [Firmware Info Section](#firmware-info-section)). Upon boot, the bootloader will check the integrity of the image and only boot if the CRC32 matches.
+

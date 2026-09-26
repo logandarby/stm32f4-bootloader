@@ -26,12 +26,12 @@ typedef enum {
  * alternate functions
  * NOTE: Requires you call led_teardown at the end of the program
  */
-void led_setup();
+void led_setup(void);
 
-void led_toggle();
+void led_toggle(void);
 
 void led_set(LedState set);
 
-void led_teardown();
+void led_teardown(void);
 
 #endif /* A3B63FAB_7D0C_4BF7_80A6_792926AF43C6 */

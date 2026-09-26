@@ -6,6 +6,26 @@
  */
 
 //-------------------------------
+// SECTION
+//-------------------------------
+
+#if defined(__GNUC__) || defined(__clang__)
+#define SECTION(name) __attribute__((section(name)))
+#define SECTION_SUPPORTED 1
+
+#elif defined(_MSC_VER)
+#define SECTION(name) __declspec(allocate(name))
+#define SECTION_SUPPORTED 1
+
+#else
+#define SECTION_SUPPORTED 0
+#endif
+
+#if !SECTION_SUPPORTED
+typedef char section_attribute_not_supported[-1];
+#endif
+
+//-------------------------------
 // NORETURN
 //-------------------------------
 
@@ -57,13 +77,13 @@
     int dummy;                   \
   }))
 #elif defined(__GNUC__) || defined(__clang__)
-    /* GCC/Clang extension for expression-level static check */
+/* GCC/Clang extension for expression-level static check */
 #define STATIC_ASSERT_EXPR(cond) (sizeof(char[1 - 2 * !(cond)]))
 #elif defined(_MSC_VER)
-    /* MSVC C99/C11 static check */
+/* MSVC C99/C11 static check */
 #define STATIC_ASSERT_EXPR(cond) (sizeof(char[1 - 2 * !(cond)]))
 #else
-    /* Fallback: no static check */
+/* Fallback: no static check */
 #define STATIC_ASSERT_EXPR(cond) 0
 #endif
 
@@ -80,12 +100,12 @@
   (!__builtin_types_compatible_p(__typeof__(x), __typeof__(&(x)[0])) && \
    !__builtin_types_compatible_p(__typeof__(x), __typeof__(*(x))))
 #else
-    /*
-     * Fallback pointer check for other compilers:
-     * Compare pointer types of &x and x. For pointers, typeof(&ptr) ==
-     * typeof(ptr*), whereas for arrays, &arr is an array pointer
-     * (int(*)[N]), not int**.
-     */
+/*
+ * Fallback pointer check for other compilers:
+ * Compare pointer types of &x and x. For pointers, typeof(&ptr) ==
+ * typeof(ptr*), whereas for arrays, &arr is an array pointer
+ * (int(*)[N]), not int**.
+ */
 #define IS_ARRAY(x) \
   (!__builtin_types_compatible_p(__typeof__(x), __typeof__(&(x)[0])))
 #endif

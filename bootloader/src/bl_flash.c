@@ -1,4 +1,4 @@
-#include "bl-flash.h"
+#include "bl_flash.h"
 
 #include <libopencm3/stm32/flash.h>
 
