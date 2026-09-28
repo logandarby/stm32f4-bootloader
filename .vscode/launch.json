@@ -7,7 +7,7 @@
       "request": "launch",
       "servertype": "openocd",
       "cwd": "${workspaceFolder}",
-      "executable": "${workspaceFolder}/firmware/firmware.elf",
+      "executable": "${workspaceFolder}/bootloader/bootloader.elf",
       "device": "STM32F401RE",
       "configFiles": [
         "interface/stlink.cfg",
@@ -16,6 +16,9 @@
       "symbolFiles": [
         {
           "file": "${workspaceFolder}/bootloader/bootloader.elf"
+        },
+        {
+          "file": "${workspaceFolder}/default_firmware/default_firmware.elf"
         }
       ],
       "gdbPath": "gdb-multiarch",

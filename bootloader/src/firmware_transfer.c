@@ -1,7 +1,8 @@
-#include "firmware-transfer.h"
+#include "firmware_transfer.h"
 
 #include "bl_flash.h"
 #include "fw_info.h"
+#include "memory.h"
 #include "packet-transfer.h"
 #include "timer.h"
 #include "uart.h"
@@ -144,7 +145,7 @@ void firmware_transfer_start(void) {
                     ((uint32_t)fw_packet_buffer.data[4] << 24);
 
         // Enforce range check
-        if (fw_length == 0 || fw_length > FW_MAX_FW_LEN) {
+        if (fw_length == 0 || fw_length > FIRMWARE_MAX_LEN) {
           fw_fail();
           continue;
         }

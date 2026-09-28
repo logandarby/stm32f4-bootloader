@@ -1,4 +1,5 @@
 #include <libopencm3/cm3/scb.h>
+#include <libopencm3/stm32/flash.h>
 #include <libopencm3/stm32/gpio.h>
 #include <libopencm3/stm32/rcc.h>
 
@@ -7,7 +8,6 @@
 #include "system.h"
 
 NORETURN int main(void) {
-  SCB_VTOR = FIRMWARE_START_ADDR;
   system_setup();
   led_setup();
 

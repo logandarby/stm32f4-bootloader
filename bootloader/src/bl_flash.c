@@ -2,8 +2,7 @@
 
 #include <libopencm3/stm32/flash.h>
 
-#define FIRMWARE_SECTOR_START (2U)
-#define FIRMWARE_SECTOR_END (7U)
+#include "memory.h"
 
 void bl_flash_write(const uint32_t addr, const uint8_t* data,
                     const size_t data_len) {

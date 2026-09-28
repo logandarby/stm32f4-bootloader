@@ -35,6 +35,6 @@ winget install --interactive --exact dorssel.usbipd-win
 # Use
 # Note the BUS ID of ST-Link
 usbipd list
-usbipd bind --busid {INSERT BUS_ID}
-usbipd attach --wsl --busid {INSERT BUS_ID}
+usbipd bind -b {INSERT BUS_ID}
+usbipd attach --wsl -ab {INSERT BUS_ID}
 ```

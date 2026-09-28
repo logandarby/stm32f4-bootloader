@@ -13,15 +13,6 @@
 #include "common.h"
 
 #define FW_INFO_SENTINEL (0xC0FFEE00U)
-#define DEVICE_ID (0x14U)
-#define CPU_FREQ_HZ (84000000U)
-#define BOOTLOADER_SIZE (0x8000U)
-#define FLASH_SIZE (1024U * 512U)
-#define FW_INFO_ADDR (FIRMWARE_START_ADDR + sizeof(vector_table_t))
-#define FIRMWARE_START_ADDR (FLASH_BASE + BOOTLOADER_SIZE)
-
-#define FW_INFO_ADDR (FIRMWARE_START_ADDR + sizeof(vector_table_t))
-#define FW_INFO_VALIDATE_FROM (FW_INFO_ADDR + sizeof(firmware_info_t))
 #define FW_CRC_VALIDATE_LEN(fw_length) \
   ((fw_length) - sizeof(vector_table_t) - sizeof(firmware_info_t))
 #define FW_CRC_MAX_LEN                                     \

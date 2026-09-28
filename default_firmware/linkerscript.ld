@@ -1,33 +1,41 @@
 /* Enforce emmition of the vector table. */
 EXTERN(vector_table)
+
 /* Define the entry point of the output file. */
 ENTRY(reset_handler)
-/* Enforce emission of slot regions for default firmware */
-EXTERN(default_fw_slot_a)
-EXTERN(default_fw_slot_b)
 
 /* Define memory regions. */
 MEMORY
 {
-    rom (rx)    : ORIGIN = 0x08000000, LENGTH = 32K /* Bootloader */
-		meta (r)	  : ORIGIN = 0x08008000, LENGTH = 16K /* Bootloader metadata */
-		slot_a (rx) : ORIGIN = 0x0800C000, LENGTH = 208K   /* Slot A (Sectors 3–5) */
-    slot_b (rx) : ORIGIN = 0x08040000, LENGTH = 256K   /* Slot B (Sectors 6–7) */
-		ram (rwx)   : ORIGIN = 0x20000000, LENGTH = 96K
+    rom (rx)  : ORIGIN = 0x0800C000, LENGTH = 208K
+		ram (rwx) : ORIGIN = 0x20000000, LENGTH = 96K
 }
 
 /* Define sections. */
 SECTIONS
 {
 	.text : {
+		_firmware_start = .;
+
+		_vector_table_start = .;
 		*(.vectors)	/* Vector table */
+		_vector_table_end = .;
+
+		. = ALIGN(4);
+
+		_firmware_info_start = .;
+		KEEP (*(.firmware_info))	/* Firmware specific info to store on device during transfer  */
+		_firmware_info_end = .;
+
+		. = ALIGN(4);
+		
 		*(.text*)	/* Program code */
 		. = ALIGN(4);
 		*(.rodata*)	/* Read-only data */
 		. = ALIGN(4);
 	} >rom
 
-	.preinit_array : {
+		.preinit_array : {
 			. = ALIGN(4);
 			__preinit_array_start = .;
 			KEEP (*(.preinit_array))
@@ -63,30 +71,6 @@ SECTIONS
 	. = ALIGN(4);
 	_etext = .;
 
-	.bootloader_metadata : {
-			. = ALIGN(4);
-			_boot_metadata_start = .;
-			KEEP(*(.bootloader_metadata))
-			. = ALIGN(4);
-			_boot_metadata_end = .;
-	} >meta
-
-	/* Embed Default Firmware Payload into Slot A & Pad out to 212 KiB */
-	.slot_a_fw : {
-			FILL(0xFF)
-			_slot_a_start = .;
-			KEEP(*(.slot_a_data))
-			. = ORIGIN(slot_a) + LENGTH(slot_a);  /* Force section expansion */
-			_slot_a_end = .;
-	} >slot_a
-
-	/* Embed Default Firmware Payload into Slot B & Pad out to 256 KiB */
-	.slot_b_fw : {
-			_slot_b_start = .;
-			KEEP(*(.slot_b_data))
-			_slot_b_end = .;
-	} >slot_b
-
 	/* ram, but not cleared on reset, eg boot/app comms */
 	.noinit (NOLOAD) : {
 		*(.noinit*)
@@ -109,16 +93,13 @@ SECTIONS
 		_ebss = .;
 	} >ram
 
-
 	. = ALIGN(4);
 	end = .;
 }
 
 PROVIDE(_stack = ORIGIN(ram) + LENGTH(ram));
 
-/* Export Bootloader Metadata Sector symbols */
-PROVIDE(_boot_metadata_start = ORIGIN(meta));
-PROVIDE(_boot_metadata_end   = ORIGIN(meta) + LENGTH(meta));
-
-_slot_a_max_size = LENGTH(slot_a);
-_slot_b_max_size = LENGTH(slot_b);
+/* Export explicit size constants for usage in C code / patch scripts */
+PROVIDE(_vector_table_size = _vector_table_end - _vector_table_start);
+PROVIDE(_firmware_info_size = _firmware_info_end - _firmware_info_start);
+PROVIDE(_payload_size = _payload_end - _payload_start);

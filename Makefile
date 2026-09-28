@@ -1,6 +1,6 @@
-.PHONY: all common bootloader firmware clean
+.PHONY: all common bootloader default_firmware clean
 
-all: common bootloader firmware
+all: common default_firmware bootloader 
 
 common:
 	$(MAKE) -C common
@@ -8,11 +8,11 @@ common:
 bootloader: common
 	$(MAKE) -C bootloader
 
-firmware: bootloader
-	$(MAKE) -C firmware
+default_firmware: bootloader
+	$(MAKE) -C default_firmware
 
 clean:
 	$(MAKE) -C common clean
 	$(MAKE) -C bootloader clean
-	$(MAKE) -C firmware clean
+	$(MAKE) -C default_firmware clean
 	

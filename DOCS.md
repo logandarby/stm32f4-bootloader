@@ -284,3 +284,118 @@ flowchart TD
 
 Multiple layers of error detection are performed in the packet and firmware transfer protocols. However, as a final check, the CRC32 of the firmware image (minus the vector table and minus the firmware info sections) is calculated upon transfer, and stored in the device in the firmware info section (See [Firmware Info Section](#firmware-info-section)). Upon boot, the bootloader will check the integrity of the image and only boot if the CRC32 matches.
 
+## Firmware Integrity & Rollback
+
+The bootloader enforces an A/B Swap & Rollback pattern to ensure fail-safe execution. All execution occurs out of Slot A (Primary) at physical origin `0x0800 C000`. Slot B (Backup) serves as a staging area and rollback restore source.
+
+A dedicated Boot Metadata Sector (Flash Sector 2) stores persistent state across reboots. To minimize flash wear, state transitions utilize a zero-erase bit-flipping methodology.
+
+### Flash Memory Layout
+
+| Region / Sector                   | Flash Address Range           | Size    | Description                                        |
+| --------------------------------- | ----------------------------- | ------- | -------------------------------------------------- |
+| **Bootloader** (Sectors 0–1)      | `0x0800 0000` – `0x0800 7FFF` | 32 KiB  | Immutable bootloader code                          |
+| **Boot Metadata** (Sector 2)      | `0x0800 8000` – `0x0800 BFFF` | 16 KiB  | Non-volatile state, versions, and validation flags |
+| **Slot A (Active)** (Sectors 3–5) | `0x0800 C000` – `0x0803 FFFF` | 212 KiB | Execution region (`ORIGIN = 0x0800C000`)           |
+| **Slot B (Backup)** (Sectors 6–7) | `0x0804 0000` – `0x0807 FFFF` | 256 KiB | Backup / Staging region                            |
+
+---
+
+### Bootloader Metadata Configuration
+
+A `boot_metadata_t` structure is stored at offset `0x0800 8000` in Flash Sector 2. Because flash memory can only be flipped from `1` to `0` without an erase, the `state` field is designed as a 32-bit word that transitions by clearing bits.
+
+| Field            | Type       | Description                                                     |
+| ---------------- | ---------- | --------------------------------------------------------------- |
+| `sentinel`       | `uint32_t` | Magic number (`0x424F4F54` / `"BOOT"`) verifying valid metadata |
+| `state`          | `uint32_t` | Current boot state (transitions via zero-erase bit-flipping)    |
+| `active_version` | `uint32_t` | Version number currently running in Slot A                      |
+| `backup_version` | `uint32_t` | Version number backed up in Slot B                              |
+| `crc32`          | `uint32_t` | CRC32 calculated over the struct (excluding the `state` field)  |
+
+#### Bit-Flipping State Flags
+
+Using 32-bit word programming (`bl_flash_write`), the states transition strictly downward. Sector 2 is only erased when a new firmware transfer occurs, never during normal boot or application confirmation.
+
+| Hex Value    | State Flag           | Description                                                        |
+| ------------ | -------------------- | ------------------------------------------------------------------ |
+| `0xFFFFFFFF` | `STATE_ERASED`       | Default state after a sector erase                                 |
+| `0xFFFFFFFE` | `STATE_PENDING_TEST` | Flips Bit 0. Written by bootloader prior to testing a new update   |
+| `0xFFFFFFFC` | `STATE_CONFIRMED`    | Flips Bit 1. Written by application to verify successful execution |
+| `0x00000000` | `STATE_ROLLBACK_REQ` | Flips all bits. Triggers restore from Slot B on the next boot      |
+
+---
+
+### Downgrade Protection & Validation Rules
+
+Before initiating an update or swapping images, the bootloader validates three constraints against the incoming `firmware_info_t` struct:
+
+* **CRC32 Integrity Check:** The calculated STM32 hardware CRC32 of the firmware image payload (excluding vector table and info section) must match `firmware_info_t.crc32`.
+* **Downgrade Protection:** The incoming version (`firmware_info_t.version`) must be greater than or equal to `metadata.active_version`. Decrementing versions are rejected (`FW_BYTE_NACK`).
+* **Slot Size Check:** Firmware length must not exceed 212 KiB (`0x0003 4000` bytes) to ensure it fits within Slot A.
+
+---
+
+### Application Confirmation (IWDG)
+
+To protect against system hangs or hard faults in newly flashed application firmware, an Independent Watchdog (IWDG) confirmation sequence is required:
+
+1. Upon jumping to Slot A in `STATE_PENDING_TEST`, the bootloader enables the IWDG with a 5-second timeout window.
+2. The main application must initialize core peripherals and invoke a confirmation routine (e.g., `bootloader_confirm_app()`) before the IWDG expires.
+3. This routine writes `0xFFFFFFFC` (`STATE_CONFIRMED`) directly to the `state` memory address in Sector 2 (no erase performed) and begins feeding the watchdog.
+4. If the application crashes or hangs before confirming, the IWDG hardware forces a system reset. On reboot, the bootloader reads `STATE_PENDING_TEST`, directly overwrites the state to `0x00000000` (`STATE_ROLLBACK_REQ`), and initiates an automatic rollback.
+
+---
+
+### Bootloader State Machine
+
+```mermaid
+flowchart TD
+    START([Device Reset / Power On]) --> CHECK_BTN{B1 Pushbutton<br/>Pressed?}
+
+    %% Bootloader Mode Path
+    CHECK_BTN -->|Yes| TRANSFER_MODE[Enter Transfer Mode<br/>Green LED On / Listen UART]
+    
+    TRANSFER_MODE --> RECV_FW[Receive FW Image<br/>Layer 1 & 2 Protocols]
+    RECV_FW --> EVAL_FW{Validate FW Payload:<br/>CRC OK, Size <= 212KiB,<br/>Version >= Active?}
+
+    EVAL_FW -->|Invalid / Downgrade| TX_NACK[Send FW_BYTE_NACK<br/>Abort & Wait for Retry]
+    TX_NACK --> TRANSFER_MODE
+
+    EVAL_FW -->|Valid| BACKUP_CURRENT[Erase Sectors 6-7 &<br/>Copy Slot A -> Slot B]
+    BACKUP_CURRENT --> FLASH_NEW[Erase Sectors 3-5 &<br/>Write New Image to Slot A]
+    FLASH_NEW --> SET_PENDING[Erase Sector 2 & Write Metadata<br/>State = STATE_PENDING_TEST]
+    SET_PENDING --> START_IWDG
+
+    %% Normal Execution Mode Path
+    CHECK_BTN -->|No| READ_META[Read Sector 2 Boot Metadata]
+    
+    READ_META --> META_VAL{Metadata Valid &<br/>Magic OK?}
+    META_VAL -->|No / Corrupt| RECOVER_META[Set STATE_ROLLBACK_REQ]
+    RECOVER_META --> DO_ROLLBACK
+    
+    META_VAL -->|Yes| CHECK_STATE{Check Metadata<br/>State Flag}
+
+    CHECK_STATE -->|STATE_PENDING_TEST| MARK_ROLLBACK[Watchdog Reset Detected!<br/>Set STATE_ROLLBACK_REQ]
+    MARK_ROLLBACK --> DO_ROLLBACK
+
+    CHECK_STATE -->|STATE_ROLLBACK_REQ| DO_ROLLBACK[Erase Sectors 3-5 &<br/>Copy Slot B -> Slot A]
+    DO_ROLLBACK --> REWRITE_META[Erase Sector 2 & Write<br/>Restored Metadata]
+    REWRITE_META --> VERIFY_A_CRC
+
+    CHECK_STATE -->|STATE_CONFIRMED| VERIFY_A_CRC{Slot A Hardware<br/>CRC32 Valid?}
+
+    VERIFY_A_CRC -->|No / Corrupt| TRIGGER_ROLLBACK[Set STATE_ROLLBACK_REQ]
+    TRIGGER_ROLLBACK --> DO_ROLLBACK_FAIL{Rollback Already<br/>Attempted?}
+    
+    DO_ROLLBACK_FAIL -->|No| DO_ROLLBACK
+    DO_ROLLBACK_FAIL -->|Yes / Both Corrupt| TRANSFER_MODE
+
+    VERIFY_A_CRC -->|Yes| JUMP_CHECK{Is State<br/>STATE_PENDING_TEST?}
+    
+    JUMP_CHECK -->|Yes| START_IWDG[Start IWDG Watchdog<br/>5s Timeout]
+    JUMP_CHECK -->|No| JUMP_APP
+
+    START_IWDG --> JUMP_APP([Relocate VTOR to 0x0800C000<br/>& Jump to Slot A Execution])
+```
+

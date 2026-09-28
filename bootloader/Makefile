@@ -7,9 +7,11 @@ endif
 SRC_DIR        = src
 OBJ_DIR        = obj
 COMMON_DIR     = ../common
+DEFAULT_FW_DIR = ../default_firmware
 OPENCM3_DIR    = ../libopencm3
 
 BINARY         = bootloader
+DEFAULT_FW_BINARY = $(DEFAULT_FW_DIR)/default_firmware.bin
 
 ###############################################################################
 # Basic Device Setup
@@ -112,7 +114,7 @@ GENERATED_BINARIES = $(BINARY).elf $(BINARY).bin $(BINARY).hex $(BINARY).srec $(
 
 %.bin: %.elf
 	$(Q)$(OBJCOPY) -Obinary $< $@
-	$(Q)python3 ../scripts/pad-bootloader.py
+# 	$(Q)python3 ../scripts/pad-bootloader.py
 
 %.hex: %.elf
 	$(Q)$(OBJCOPY) -Oihex $< $@
@@ -133,6 +135,11 @@ $(COMMON_DIR)/libcommon.a:
 	$(warning libcommon.a not found, attempting to rebuild in $(COMMON_DIR))
 	$(MAKE) -C $(COMMON_DIR)
 
+# Ensure default firmware is built
+$(DEFAULT_FW_BINARY):
+	$(warning default_firmware.bin not found, attempting to rebuild in $(DEFAULT_FW_DIR))
+	$(MAKE) -C $(DEFAULT_FW_DIR)
+
 # Link the final bootloader binary
 %.elf %.map: $(OBJS) $(LDSCRIPT) $(OPENCM3_DIR)/lib/lib$(LIBNAME).a $(COMMON_DIR)/libcommon.a Makefile
 	$(Q)$(LD) $(TGT_LDFLAGS) $(LDFLAGS) $(OBJS) $(LDLIBS) -o $*.elf
@@ -143,7 +150,7 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
 	$(Q)$(CC) $(TGT_CFLAGS) $(CFLAGS) $(TGT_CPPFLAGS) $(CPPFLAGS) -o $@ -c $<
 
 # Compile Assembly sources
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.S
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.S $(DEFAULT_FW_BINARY)
 	@mkdir -p $(@D)
 	$(Q)$(CC) $(TGT_CFLAGS) $(CFLAGS) -o $@ -c $<
 

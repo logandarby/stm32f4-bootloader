@@ -2,6 +2,7 @@ import ctypes
 import crcmod
 import struct
 import functools
+import argparse
 
 FW_INFO_SENTINEL = 0xC0FFEE00
 DEVICE_ID = 0x14
@@ -115,16 +116,34 @@ def patch_firmware(fw_data: bytearray, device_id: int, version: int) -> None:
     return fw_data, updated_info
 
 
-# def main():
-#     with open("../example_transfer_firmware_2.bin", "rb") as f:
-#         raw_file = bytearray(f.read())
+def main():
+    
+    parser = argparse.ArgumentParser(description="Patch firmware binary header with length, version, and CRC32.")
+    parser.add_argument("-i", "--input", required=True, help="Input firmware binary (.bin)")
+    parser.add_argument("-o", "--output", help="Output firmware binary (defaults to overwriting input in-place)")
+    parser.add_argument("-v", "--version", type=lambda x: int(x, 0), default=0x00010000, help="Firmware version (e.g., 0x00010000)")
+    parser.add_argument("-d", "--device-id", type=lambda x: int(x, 0), default=DEVICE_ID, help="Target Device ID (e.g., 0x14)")
 
-#     patched_file, info = patch_firmware(raw_file, version=0x00010000, device_id=DEVICE_ID)
-#     print(hex(info.length))
-#     print(hex(info.crc32))
+    args = parser.parse_args()
+    output_path = args.output if args.output else args.input
 
-#     with open("../example_transfer_firmware.new.bin", "wb") as f:
-#         f.write(patched_file)
+    try:
+        with open(args.input, "rb") as f:
+            raw_file = bytearray(f.read())
+
+        patched_file, info = patch_firmware(raw_file, device_id=args.device_id, version=args.version)
+
+        with open(output_path, "wb") as f:
+            f.write(patched_file)
+
+        print(f"[PATCH] {output_path}: Length=0x{info.length:X} ({info.length}B), CRC32=0x{info.crc32:08X}, Ver=0x{info.version:08X}")
+
+    except FirmwarePatchError as e:
+        print(f"[PATCH ERROR] {e}", file=sys.stderr)
+        sys.exit(1)
+
+    with open("../example_transfer_firmware.new.bin", "wb") as f:
+        f.write(patched_file)
 
 
 if __name__ == "__main__":

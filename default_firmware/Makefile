@@ -7,11 +7,21 @@ endif
 SRC_DIR        = src
 OBJ_DIR        = obj
 COMMON_DIR     = ../common
-BOOTLOADER_DIR = ../bootloader
 OPENCM3_DIR    = ../libopencm3
 
-BOOTLOADER_BIN = $(BOOTLOADER_DIR)/bootloader.bin
-BINARY         = firmware
+BINARY         = default_firmware
+
+###############################################################################
+# Firmware Version & Metadata Options
+
+FW_VERSION     ?= 0x00010000
+DEVICE_ID      ?= 0x14
+PATCH_SCRIPT   ?= ../scripts/patch_firmware.py
+REQUIREMENTS      ?= ../scripts/requirements.txt
+VENV_DIR ?= ../scripts/.venv
+PYTHON ?= $(VENV_DIR)/bin/python
+PIP ?= $(VENV_DIR)/bin/pip
+PYTHON_DEPS_STAMP  = $(OBJ_DIR)/.python_deps
 
 ###############################################################################
 # Basic Device Setup
@@ -28,14 +38,14 @@ LDSCRIPT        = linkerscript.ld
 LDLIBS          += -lcommon
 LDLIBS          += -l$(LIBNAME)
 LDFLAGS         += -L$(OPENCM3_DIR)/lib
-LDFLAGS					+= -L$(COMMON_DIR)
+LDFLAGS         += -L$(COMMON_DIR)
 
 ###############################################################################
 # Includes
 
 DEFS            += -I$(OPENCM3_DIR)/include
 DEFS            += -I$(SRC_DIR)
-DEFS						+= -I$(COMMON_DIR)/src
+DEFS            += -I$(COMMON_DIR)/src
 
 ###############################################################################
 # Executables
@@ -140,8 +150,22 @@ print-%:
 %.images: %.bin %.hex %.srec %.list %.map
 	@#printf "*** $* images generated ***\n"
 
-%.bin: %.elf
+$(OBJ_DIR):
+	$(Q)mkdir -p $@
+
+# Rule to install python dependencies whenever requirements.txt changes
+$(PYTHON_DEPS_STAMP): $(REQUIREMENTS) | $(OBJ_DIR)
+	@echo "  PIP     Installing dependencies from $(REQUIREMENTS)"
+	$(Q)test -d $(VENV_DIR) || python3 -m venv $(VENV_DIR)
+	$(Q)$(PIP) install -q -r $(REQUIREMENTS)
+	$(Q)touch $@
+
+# Extract binary and patch metadata header in-place
+%.bin: %.elf $(PATCH_SCRIPT) $(PYTHON_DEPS_STAMP)
+	@echo "  OBJCOPY $@"
 	$(Q)$(OBJCOPY) -Obinary $< $@
+	@echo "  PATCH   $@"
+	$(Q)$(PYTHON) $(PATCH_SCRIPT) -i $@ -o $@ -v $(FW_VERSION) -d $(DEVICE_ID)
 
 %.hex: %.elf
 	$(Q)$(OBJCOPY) -Oihex $< $@
@@ -153,7 +177,7 @@ print-%:
 	$(Q)$(OBJDUMP) -S $< > $@
 
 # Link the final binary
-%.elf %.map: $(OBJS) $(LDSCRIPT) $(OPENCM3_DIR)/lib/lib$(LIBNAME).a $(COMMON_DIR)/libcommon.a $(BOOTLOADER_BIN) Makefile
+%.elf %.map: $(OBJS) $(LDSCRIPT) $(OPENCM3_DIR)/lib/lib$(LIBNAME).a $(COMMON_DIR)/libcommon.a Makefile
 	$(Q)$(LD) $(TGT_LDFLAGS) $(LDFLAGS) $(OBJS) $(LDLIBS) -o $*.elf
 
 # Compile C sources
@@ -180,13 +204,6 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp
 $(COMMON_DIR)/libcommon.a:
 	$(warning libcommon.a not found, attempting to rebuild in $(COMMON_DIR))
 	$(MAKE) -C $(COMMON_DIR)
-
-# Make sure bootloader directory is compiled
-$(BOOTLOADER_BIN):
-	$(warning bootloader.bin not found, attempting to rebuild in $(BOOTLOADER_DIR))
-	$(MAKE) -C $(BOOTLOADER_DIR)
-
-$(OBJ_DIR)/bootloader.o: $(BOOTLOADER_BIN)
 
 clean:
 	$(Q)$(RM) $(GENERATED_BINARIES) generated.*
