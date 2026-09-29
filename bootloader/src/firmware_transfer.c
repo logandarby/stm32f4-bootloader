@@ -1,6 +1,7 @@
 #include "firmware_transfer.h"
 
 #include "bl_flash.h"
+#include "firmware_validation.h"
 #include "fw_info.h"
 #include "memory.h"
 #include "packet-transfer.h"
@@ -25,11 +26,13 @@ static uint32_t fw_bytes_written = 0;
 static uint8_t fw_sync_seq[4] = {0};
 static packet_t fw_packet_buffer = {0};
 static timer_t timeout = {0};
+static bool is_failed = false;
 
 static void fw_fail(void) {
   packet_create_single_byte(&fw_packet_buffer, FW_BYTE_NACK);
   (void)packet_send(&fw_packet_buffer);
   fw_state = FWState_DONE;
+  is_failed = true;
 }
 
 static void check_timeout(void) {
@@ -51,7 +54,8 @@ static bool fw_is_fw_len_packet(const packet_t* packet) {
          packet->data[0] == FW_BYTE_FW_LEN_RES;
 }
 
-void firmware_transfer_start(void) {
+bool firmware_transfer_start(void) {
+  is_failed = false;
   // Reset session variables
   fw_state = FWState_SYNC;
   fw_length = 0;
@@ -155,7 +159,7 @@ void firmware_transfer_start(void) {
 
       case FWState_ERASE_FW: {
         timer_disable(&timeout);
-        bl_flash_erase_firmware();
+        bl_flash_erase_firmware(BLFlashFWSlot_B);
         timer_enable(&timeout);
         timer_reset(&timeout);
 
@@ -181,7 +185,7 @@ void firmware_transfer_start(void) {
           bytes_to_write = fw_length - fw_bytes_written;
         }
 
-        bl_flash_write(FIRMWARE_START_ADDR + fw_bytes_written,
+        bl_flash_write(FW_STAGING_ADDR + fw_bytes_written,
                        fw_packet_buffer.data, bytes_to_write);
 
         fw_bytes_written += bytes_to_write;
@@ -198,6 +202,10 @@ void firmware_transfer_start(void) {
       } break;
 
       case FWState_DONE:
+        if (!fw_validate_staged_firmware_image()) {
+          fw_fail();
+          continue;
+        }
         continue;
 
       default:
@@ -208,4 +216,6 @@ void firmware_transfer_start(void) {
 
   // Make sure no other packets are currently sending
   uart_wait_for_tc();
+
+  return !is_failed;
 };

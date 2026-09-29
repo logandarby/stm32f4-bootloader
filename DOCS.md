@@ -280,70 +280,116 @@ flowchart TD
 
 ```
 
-## Firmware Integrity
-
-Multiple layers of error detection are performed in the packet and firmware transfer protocols. However, as a final check, the CRC32 of the firmware image (minus the vector table and minus the firmware info sections) is calculated upon transfer, and stored in the device in the firmware info section (See [Firmware Info Section](#firmware-info-section)). Upon boot, the bootloader will check the integrity of the image and only boot if the CRC32 matches.
-
 ## Firmware Integrity & Rollback
 
-The bootloader enforces an A/B Swap & Rollback pattern to ensure fail-safe execution. All execution occurs out of Slot A (Primary) at physical origin `0x0800 C000`. Slot B (Backup) serves as a staging area and rollback restore source.
+The bootloader enforces an atomic, power-fail-safe **Swap-with-Scratch** pattern (modeled after MCUboot) to guarantee fail-safe firmware updates and execution.
 
-A dedicated Boot Metadata Sector (Flash Sector 2) stores persistent state across reboots. To minimize flash wear, state transitions utilize a zero-erase bit-flipping methodology.
+Application execution always occurs out of **Slot A (Primary)** at physical origin `0x0802 0000` (Sector 5). **Slot B (Secondary)** at `0x0804 0000` (Sector 6) serves as the staging area for incoming image downloads over UART and holds the previous working backup after a swap. **Sector 7** (`0x0806 0000`) serves as a dedicated hardware scratch area during sector copy operations.
+
+A dedicated **Boot Metadata Sector** (Sector 2) stores persistent state, image versions, and progress flags across reboots. To minimize flash wear and guarantee atomicity across unexpected power losses mid-swap, state transitions and progress markers utilize a zero-erase bit-flipping methodology.
+
+---
 
 ### Flash Memory Layout
 
-| Region / Sector                   | Flash Address Range           | Size    | Description                                        |
-| --------------------------------- | ----------------------------- | ------- | -------------------------------------------------- |
-| **Bootloader** (Sectors 0–1)      | `0x0800 0000` – `0x0800 7FFF` | 32 KiB  | Immutable bootloader code                          |
-| **Boot Metadata** (Sector 2)      | `0x0800 8000` – `0x0800 BFFF` | 16 KiB  | Non-volatile state, versions, and validation flags |
-| **Slot A (Active)** (Sectors 3–5) | `0x0800 C000` – `0x0803 FFFF` | 212 KiB | Execution region (`ORIGIN = 0x0800C000`)           |
-| **Slot B (Backup)** (Sectors 6–7) | `0x0804 0000` – `0x0807 FFFF` | 256 KiB | Backup / Staging region                            |
+The internal Flash memory of the STM32F401RE (512 KiB) is partitioned into symmetrical 128 KiB slots and dedicated boot/metadata sectors:
+
+| Region / Sector                 | Flash Address Range           | Size    | Description                                            |
+| ------------------------------- | ----------------------------- | ------- | ------------------------------------------------------ |
+| **Bootloader** (Sectors 0–1)    | `0x0800 0000` – `0x0800 7FFF` | 32 KiB  | Immutable bootloader code                              |
+| **Boot Metadata** (Sector 2)    | `0x0800 8000` – `0x0800 BFFF` | 16 KiB  | Non-volatile state, versions, CRC, and progress log    |
+| **Reserved** (Sectors 3–4)      | `0x0800 C000` – `0x0801 FFFF` | 80 KiB  | Unused / Expansion space                               |
+| **Slot A (Active)** (Sector 5)  | `0x0802 0000` – `0x0803 FFFF` | 128 KiB | Primary execution region (`ORIGIN = 0x08020000`)       |
+| **Slot B (Staging)** (Sector 6) | `0x0804 0000` – `0x0805 FFFF` | 128 KiB | Staging region for incoming updates and backup storage |
+| **Swap Scratch** (Sector 7)     | `0x0806 0000` – `0x0807 FFFF` | 128 KiB | Temporary staging area during sector swap execution    |
 
 ---
 
 ### Bootloader Metadata Configuration
 
-A `boot_metadata_t` structure is stored at offset `0x0800 8000` in Flash Sector 2. Because flash memory can only be flipped from `1` to `0` without an erase, the `state` field is designed as a 32-bit word that transitions by clearing bits.
+A `boot_metadata_t` structure is located at address `0x0800 8000` in Flash Sector 2. Because NOR Flash memory bits can only transition from `1` to `0` without a sector erase, state flags and step progress transition strictly by clearing bits (`0xFF` $\rightarrow$ `0xFE` $\rightarrow$ `0xFC` $\rightarrow$ `0xF8`).
 
-| Field            | Type       | Description                                                     |
-| ---------------- | ---------- | --------------------------------------------------------------- |
-| `sentinel`       | `uint32_t` | Magic number (`0x424F4F54` / `"BOOT"`) verifying valid metadata |
-| `state`          | `uint32_t` | Current boot state (transitions via zero-erase bit-flipping)    |
-| `active_version` | `uint32_t` | Version number currently running in Slot A                      |
-| `backup_version` | `uint32_t` | Version number backed up in Slot B                              |
-| `crc32`          | `uint32_t` | CRC32 calculated over the struct (excluding the `state` field)  |
+```c
+typedef enum {
+    SWAP_STATE_NONE           = 0xFFFFFFFF, /* Default state: No swap required / Idle */
+    SWAP_STATE_PENDING        = 0xFFFFFFFE, /* Bit 0 cleared: Slot B verified; swap requested */
+    SWAP_STATE_IN_PROGRESS    = 0xFFFFFFFC, /* Bit 1 cleared: 128K sector swap active */
+    SWAP_STATE_COMPLETED      = 0xFFFFFFF8, /* Bit 2 cleared: Sector swap successfully finished */
+    SWAP_STATE_REVERT_PENDING = 0xFFFFFFF0, /* Bit 3 cleared: App test failed; revert requested */
+    SWAP_STATE_REVERT_IN_PROG = 0xFFFFFFE0  /* Bit 4 cleared: Revert swap active */
+} swap_state_t;
 
-#### Bit-Flipping State Flags
+typedef enum {
+    SWAP_STEP_IDLE           = 0xFFFFFFFF, /* Default state: No steps completed */
+    SWAP_STEP_0_SCRATCH_DONE = 0xFFFFFFFE, /* Bit 0 cleared: Slot A backed up to Scratch (Sec 7) */
+    SWAP_STEP_1_SLOTA_DONE   = 0xFFFFFFFC, /* Bit 1 cleared: Slot B copied to Slot A (Sec 5) */
+    SWAP_STEP_2_SLOTB_DONE   = 0xFFFFFFF8  /* Bit 2 cleared: Scratch copied to Slot B (Sec 6) */
+} swap_step_t;
 
-Using 32-bit word programming (`bl_flash_write`), the states transition strictly downward. Sector 2 is only erased when a new firmware transfer occurs, never during normal boot or application confirmation.
+typedef struct {
+    uint32_t sentinel;         /* Magic number (0x424F4F54 / "BOOT") */
+    uint32_t swap_state;       /* Current swap state (SWAP_STATE_*) */
+    uint32_t app_state;        /* Application test state (BLMetaState_PENDING_TEST or CONFIRMED) */
+    uint32_t active_version;   /* Version number currently running in Slot A */
+    uint32_t staging_version;  /* Version number staged in Slot B */
+    uint32_t active_crc32;     /* Expected hardware CRC32 of Slot A image */
+    uint32_t staging_crc32;    /* Hardware CRC32 of Slot B image */
+    
+    uint32_t swap_step;        /* Single-word progress tracker (SWAP_STEP_*) */
+} boot_metadata_t;
 
-| Hex Value    | State Flag           | Description                                                        |
-| ------------ | -------------------- | ------------------------------------------------------------------ |
-| `0xFFFFFFFF` | `STATE_ERASED`       | Default state after a sector erase                                 |
-| `0xFFFFFFFE` | `STATE_PENDING_TEST` | Flips Bit 0. Written by bootloader prior to testing a new update   |
-| `0xFFFFFFFC` | `STATE_CONFIRMED`    | Flips Bit 1. Written by application to verify successful execution |
-| `0x00000000` | `STATE_ROLLBACK_REQ` | Flips all bits. Triggers restore from Slot B on the next boot      |
+```
+
+#### Bit-Flipping Application Flags (`BLMetaState`)
+
+| Hex Value    | State Flag                 | Description                                                                                        |
+| ------------ | -------------------------- | -------------------------------------------------------------------------------------------------- |
+| `0xFFFFFFFF` | `BLMetaState_ERASED`       | Default state after a sector erase.                                                                |
+| `0xFFFFFFFE` | `BLMetaState_PENDING_TEST` | Flips Bit 0. Written prior to executing and testing a newly swapped application.                   |
+| `0xFFFFFFFC` | `BLMetaState_CONFIRMED`    | Flips Bit 1. Written by application via `bootloader_confirm_app()` to verify successful execution. |
+| `0x00000000` | `BLMetaState_ROLLBACK_REQ` | Flips all bits. Triggers automatic swap revert on next boot.                                       |
 
 ---
 
 ### Downgrade Protection & Validation Rules
 
-Before initiating an update or swapping images, the bootloader validates three constraints against the incoming `firmware_info_t` struct:
+Before marking Slot B payload as valid and writing `SWAP_STATE_PENDING`, the bootloader verifies three validation constraints against the incoming payload:
 
-* **CRC32 Integrity Check:** The calculated STM32 hardware CRC32 of the firmware image payload (excluding vector table and info section) must match `firmware_info_t.crc32`.
-* **Downgrade Protection:** The incoming version (`firmware_info_t.version`) must be greater than or equal to `metadata.active_version`. Decrementing versions are rejected (`FW_BYTE_NACK`).
-* **Slot Size Check:** Firmware length must not exceed 212 KiB (`0x0003 4000` bytes) to ensure it fits within Slot A.
+* **CRC32 Integrity Check:** The calculated STM32 hardware CRC32 of the payload written to Slot B must match the expected checksum.
+* **Downgrade Protection:** The incoming version (`staging_version`) must be strictly greater than or equal to `active_version`. Decrementing versions are rejected with `FW_BYTE_NACK`.
+* **Slot Size Check:** Firmware length must not exceed 128 KiB (`0x0002 0000` bytes) to fit within Sector 5 limits.
 
 ---
 
-### Application Confirmation (IWDG)
+### Atomic Swap-With-Scratch Engine
 
-To protect against system hangs or hard faults in newly flashed application firmware, an Independent Watchdog (IWDG) confirmation sequence is required:
+Because both Slot A (Sector 5) and Slot B (Sector 6) are 1:1 symmetrical 128 KiB sectors, the swap algorithm executes cleanly using full 128 KiB hardware sector erases with Sector 7 acting as the Scratch staging area:
 
-1. Upon jumping to Slot A in `STATE_PENDING_TEST`, the bootloader enables the IWDG with a 5-second timeout window.
-2. The main application must initialize core peripherals and invoke a confirmation routine (e.g., `bootloader_confirm_app()`) before the IWDG expires.
-3. This routine writes `0xFFFFFFFC` (`STATE_CONFIRMED`) directly to the `state` memory address in Sector 2 (no erase performed) and begins feeding the watchdog.
-4. If the application crashes or hangs before confirming, the IWDG hardware forces a system reset. On reboot, the bootloader reads `STATE_PENDING_TEST`, directly overwrites the state to `0x00000000` (`STATE_ROLLBACK_REQ`), and initiates an automatic rollback.
+```
+[Slot A: Sector 5]  <--->  [Scratch: Sector 7]  <--->  [Slot B: Sector 6]
+
+```
+
+1. **State Initialization:** The bootloader writes `SWAP_STATE_IN_PROGRESS` to Sector 2 metadata.
+2. **Step 0 (Slot A $\rightarrow$ Scratch):** If `swap_step == SWAP_STEP_IDLE`, erase Sector 7 (Scratch), copy 128 KiB from Sector 5 (Slot A) into Sector 7, and bit-flip `swap_step = SWAP_STEP_0_SCRATCH_DONE`.
+3. **Step 1 (Slot B $\rightarrow$ Slot A):** If `swap_step == SWAP_STEP_0_SCRATCH_DONE`, erase Sector 5 (Slot A), copy 128 KiB from Sector 6 (Slot B) into Sector 5, and bit-flip `swap_step = SWAP_STEP_1_SLOTA_DONE`.
+4. **Step 2 (Scratch $\rightarrow$ Slot B):** If `swap_step == SWAP_STEP_1_SLOTA_DONE`, erase Sector 6 (Slot B), copy 128 KiB from Sector 7 (Scratch) into Sector 6, and bit-flip `swap_step = SWAP_STEP_2_SLOTB_DONE`.
+5. **Completion:** `swap_state` transitions to `SWAP_STATE_COMPLETED` and `app_state` transitions to `BLMetaState_PENDING_TEST`.
+
+#### Power-Loss Recovery
+
+If power is lost during any step, the bootloader reboots, reads `swap_state == SWAP_STATE_IN_PROGRESS`, inspects `swap_step`, and resumes execution directly at the incomplete step without re-erasing or re-copying completed stages.
+
+---
+
+### Application Confirmation (IWDG) & Revert Flow
+
+To guard against software hangs, crashes, or hard faults in newly swapped applications:
+
+1. Upon jumping to Slot A (`0x0802 0000`) in `BLMetaState_PENDING_TEST`, the bootloader initializes the IWDG with a **5-second timeout window**.
+2. The main application must initialize its peripherals and invoke `bootloader_confirm_app()` before the watchdog expires.
+3. `bootloader_confirm_app()` writes `0xFFFFFFFC` (`BLMetaState_CONFIRMED`) directly to `app_state` in Sector 2 Flash (zero-erase bit-flip) and continuously feeds the watchdog.
+4. **Revert Sequence:** If the application hangs or crashes before confirming, the IWDG forces a system reset. On reboot, the bootloader reads `BLMetaState_PENDING_TEST`, writes `SWAP_STATE_REVERT_PENDING`, resets `swap_step` to `SWAP_STEP_IDLE`, and re-executes the swap engine to exchange Sector 5 and Sector 6 back, restoring the known-good backup image.
 
 ---
 
@@ -353,49 +399,76 @@ To protect against system hangs or hard faults in newly flashed application firm
 flowchart TD
     START([Device Reset / Power On]) --> CHECK_BTN{B1 Pushbutton<br/>Pressed?}
 
-    %% Bootloader Mode Path
-    CHECK_BTN -->|Yes| TRANSFER_MODE[Enter Transfer Mode<br/>Green LED On / Listen UART]
+    %% Bootloader Mode / Host Download Path
+    CHECK_BTN -->|Yes| TRANSFER_MODE[Enter Host Transfer Mode<br/>Green LED On / Listen UART]
+    TRANSFER_MODE --> RECV_SLOT_B["Receive FW Image directly into<br/>Slot B : 0x08040000 (Sector 6)"]
     
-    TRANSFER_MODE --> RECV_FW[Receive FW Image<br/>Layer 1 & 2 Protocols]
-    RECV_FW --> EVAL_FW{Validate FW Payload:<br/>CRC OK, Size <= 212KiB,<br/>Version >= Active?}
-
-    EVAL_FW -->|Invalid / Downgrade| TX_NACK[Send FW_BYTE_NACK<br/>Abort & Wait for Retry]
+    RECV_SLOT_B --> EVAL_SLOT_B{"Validate Slot B Payload:<br/>CRC32 OK, Size <= 128KiB,<br/>Version >= Active?"}
+    
+    EVAL_SLOT_B -->|Invalid / Downgrade| TX_NACK[Send FW_BYTE_NACK<br/>Abort & Wait for Retry]
     TX_NACK --> TRANSFER_MODE
 
-    EVAL_FW -->|Valid| BACKUP_CURRENT[Erase Sectors 6-7 &<br/>Copy Slot A -> Slot B]
-    BACKUP_CURRENT --> FLASH_NEW[Erase Sectors 3-5 &<br/>Write New Image to Slot A]
-    FLASH_NEW --> SET_PENDING[Erase Sector 2 & Write Metadata<br/>State = STATE_PENDING_TEST]
-    SET_PENDING --> START_IWDG
+    EVAL_SLOT_B -->|Valid Payload| REQ_SWAP[Update Sector 2 Metadata:<br/>Set SWAP_STATE_PENDING]
+    REQ_SWAP --> DO_SWAP
 
-    %% Normal Execution Mode Path
+    %% Normal Boot Path
     CHECK_BTN -->|No| READ_META[Read Sector 2 Boot Metadata]
-    
     READ_META --> META_VAL{Metadata Valid &<br/>Magic OK?}
-    META_VAL -->|No / Corrupt| RECOVER_META[Set STATE_ROLLBACK_REQ]
-    RECOVER_META --> DO_ROLLBACK
     
-    META_VAL -->|Yes| CHECK_STATE{Check Metadata<br/>State Flag}
+    META_VAL -->|No / Corrupt| FORCE_RECOVERY["Enter Recovery Mode /<br/>Host Transfer Mode"]
+    FORCE_RECOVERY --> TRANSFER_MODE
 
-    CHECK_STATE -->|STATE_PENDING_TEST| MARK_ROLLBACK[Watchdog Reset Detected!<br/>Set STATE_ROLLBACK_REQ]
-    MARK_ROLLBACK --> DO_ROLLBACK
+    META_VAL -->|Yes| CHECK_SWAP_STATE{Check metadata.swap_state}
 
-    CHECK_STATE -->|STATE_ROLLBACK_REQ| DO_ROLLBACK[Erase Sectors 3-5 &<br/>Copy Slot B -> Slot A]
-    DO_ROLLBACK --> REWRITE_META[Erase Sector 2 & Write<br/>Restored Metadata]
-    REWRITE_META --> VERIFY_A_CRC
+    %% Recovery from Power Interruption mid-swap
+    CHECK_SWAP_STATE -->|SWAP_STATE_IN_PROGRESS| RESUME_SWAP[Resume Interrupted Swap:<br/>Read metadata.swap_step]
+    RESUME_SWAP --> DO_SWAP
 
-    CHECK_STATE -->|STATE_CONFIRMED| VERIFY_A_CRC{Slot A Hardware<br/>CRC32 Valid?}
+    CHECK_SWAP_STATE -->|SWAP_STATE_REVERT_IN_PROG| RESUME_REVERT[Resume Interrupted Revert:<br/>Read metadata.swap_step]
+    RESUME_REVERT --> DO_REVERT_SWAP
 
-    VERIFY_A_CRC -->|No / Corrupt| TRIGGER_ROLLBACK[Set STATE_ROLLBACK_REQ]
-    TRIGGER_ROLLBACK --> DO_ROLLBACK_FAIL{Rollback Already<br/>Attempted?}
+    CHECK_SWAP_STATE -->|SWAP_STATE_PENDING| INIT_SWAP[Set SWAP_STATE_IN_PROGRESS]
+    INIT_SWAP --> DO_SWAP
+
+    %% Swap Execution Loop (128K Sector Scratch Swap)
+    subgraph SWAP_ENGINE [128K Swap Engine]
+        DO_SWAP[Check metadata.swap_step] --> STEP_0{swap_step ==<br/>SWAP_STEP_IDLE?}
+        STEP_0 -->|Yes| DO_STEP_0["Erase Sec 7 (Scratch) -> Copy Sec 5 (Slot A) to Sec 7<br/>Bit-flip swap_step = SWAP_STEP_0_SCRATCH_DONE"]
+        DO_STEP_0 --> STEP_1
+        STEP_0 -->|No| STEP_1{swap_step ==<br/>SWAP_STEP_0_SCRATCH_DONE?}
+        STEP_1 -->|Yes| DO_STEP_1["Erase Sec 5 (Slot A) -> Copy Sec 6 (Slot B) to Sec 5<br/>Bit-flip swap_step = SWAP_STEP_1_SLOTA_DONE"]
+        DO_STEP_1 --> STEP_2
+        STEP_1 -->|No| STEP_2{swap_step ==<br/>SWAP_STEP_1_SLOTA_DONE?}
+        STEP_2 -->|Yes| DO_STEP_2["Erase Sec 6 (Slot B) -> Copy Sec 7 (Scratch) to Sec 6<br/>Bit-flip swap_step = SWAP_STEP_2_SLOTB_DONE"]
+        DO_STEP_2 --> SWAP_DONE
+        STEP_2 -->|No / Done| SWAP_DONE[Swap Completed]
+    end
+
+    SWAP_DONE --> FINISH_SWAP[Set SWAP_STATE_COMPLETED &<br/>Set BLMetaState_PENDING_TEST]
+    FINISH_SWAP --> START_IWDG
+
+    %% Watchdog & Application Execution
+    CHECK_SWAP_STATE -->|SWAP_STATE_COMPLETED / NONE| CHECK_APP_STATE{Check Metadata<br/>App State Flag}
+
+    CHECK_APP_STATE -->|BLMetaState_PENDING_TEST| WDG_FAIL[Watchdog Reset Detected!<br/>Set SWAP_STATE_REVERT_PENDING]
+    WDG_FAIL --> INIT_REVERT[Set SWAP_STATE_REVERT_IN_PROG &<br/>Reset swap_step = SWAP_STEP_IDLE]
+    INIT_REVERT --> DO_REVERT_SWAP
+
+    subgraph REVERT_ENGINE [Revert Swap Engine]
+        DO_REVERT_SWAP[Execute 128K Swap Engine] --> REVERT_DONE[Revert Completed]
+    end
+
+    REVERT_DONE --> FINISH_REVERT[Set SWAP_STATE_NONE &<br/>BLMetaState_CONFIRMED]
+    FINISH_REVERT --> VERIFY_A
+
+    CHECK_APP_STATE -->|BLMetaState_CONFIRMED| VERIFY_A{Verify Slot A<br/>Hardware CRC32}
+    VERIFY_A -->|Invalid / Corrupt| INIT_REVERT
     
-    DO_ROLLBACK_FAIL -->|No| DO_ROLLBACK
-    DO_ROLLBACK_FAIL -->|Yes / Both Corrupt| TRANSFER_MODE
-
-    VERIFY_A_CRC -->|Yes| JUMP_CHECK{Is State<br/>STATE_PENDING_TEST?}
+    VERIFY_A -->|Valid| JUMP_TEST_CHECK{Is State<br/>BLMetaState_PENDING_TEST?}
     
-    JUMP_CHECK -->|Yes| START_IWDG[Start IWDG Watchdog<br/>5s Timeout]
-    JUMP_CHECK -->|No| JUMP_APP
+    JUMP_TEST_CHECK -->|Yes| START_IWDG[Start IWDG Watchdog<br/>5s Timeout]
+    JUMP_TEST_CHECK -->|No| JUMP_APP
 
-    START_IWDG --> JUMP_APP([Relocate VTOR to 0x0800C000<br/>& Jump to Slot A Execution])
+    START_IWDG --> JUMP_APP(["Relocate VTOR to 0x0802 0000<br/>& Jump to Slot A Execution"])
+
 ```
-

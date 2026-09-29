@@ -35,7 +35,11 @@
  * Idles and blocks the application until a sync sequence is sent. Then the
  * firmware transfer sequence is initiated, and times out after value
  * FW_DEFAULT_TIMEOUT
+ *
+ * Transfers the firmware into the staging slot (slot B).
+ *
+ * returns if successful
  */
-void firmware_transfer_start(void);
+bool firmware_transfer_start(void);
 
 #endif /* BFDFD9C4_F3DC_4464_8255_CF8F65B127F8 */

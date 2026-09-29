@@ -51,7 +51,6 @@ void uart_setup(void) {
 }
 
 void uart_teardown(void) {
-  uart_wait_for_tc();
   usart_disable_rx_interrupt(USART2);
   nvic_disable_irq(NVIC_USART2_IRQ);
   usart_disable(USART2);

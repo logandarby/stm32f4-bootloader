@@ -7,7 +7,7 @@ ENTRY(reset_handler)
 /* Define memory regions. */
 MEMORY
 {
-    rom (rx)  : ORIGIN = 0x0800C000, LENGTH = 208K
+    rom (rx)  : ORIGIN = 0x08020000, LENGTH = 128K
 		ram (rwx) : ORIGIN = 0x20000000, LENGTH = 96K
 }
 
@@ -19,13 +19,11 @@ SECTIONS
 
 		_vector_table_start = .;
 		*(.vectors)	/* Vector table */
-		_vector_table_end = .;
 
 		. = ALIGN(4);
 
 		_firmware_info_start = .;
 		KEEP (*(.firmware_info))	/* Firmware specific info to store on device during transfer  */
-		_firmware_info_end = .;
 
 		. = ALIGN(4);
 		

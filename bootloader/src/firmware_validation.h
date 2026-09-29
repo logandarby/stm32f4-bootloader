@@ -12,6 +12,13 @@
  *
  * REQUIRES: The CRC module is engaged
  */
-bool fw_validate_firmware_image(void);
+bool fw_validate_active_firmware_image(void);
+
+/**
+ * Validates the staged firmware (in slot B)
+ *
+ * REQUIRES: The CRC module is engaged
+ */
+bool fw_validate_staged_firmware_image(void);
 
 #endif /* D9790484_D6CE_426E_9055_E6C40910F396 */

@@ -4,15 +4,16 @@ EXTERN(vector_table)
 ENTRY(reset_handler)
 /* Enforce emission of slot regions for default firmware */
 EXTERN(default_fw_slot_a)
-EXTERN(default_fw_slot_b)
+EXTERN(bootloader_metadata_fw)
 
 /* Define memory regions. */
 MEMORY
 {
     rom (rx)    : ORIGIN = 0x08000000, LENGTH = 32K /* Bootloader */
 		meta (r)	  : ORIGIN = 0x08008000, LENGTH = 16K /* Bootloader metadata */
-		slot_a (rx) : ORIGIN = 0x0800C000, LENGTH = 208K   /* Slot A (Sectors 3–5) */
-    slot_b (rx) : ORIGIN = 0x08040000, LENGTH = 256K   /* Slot B (Sectors 6–7) */
+		slot_a (rx) : ORIGIN = 0x08020000, LENGTH = 128K   /* Slot A (Sector 5) */
+    slot_b (rx) : ORIGIN = 0x08040000, LENGTH = 128K   /* Slot B (Sector 6) */
+    slot_scratch (rx) : ORIGIN = 0x08060000, LENGTH = 128K   /* Scratch (Sector 7) */
 		ram (rwx)   : ORIGIN = 0x20000000, LENGTH = 96K
 }
 
@@ -63,29 +64,27 @@ SECTIONS
 	. = ALIGN(4);
 	_etext = .;
 
-	.bootloader_metadata : {
+	.bootloader_metadata_fw : {
 			. = ALIGN(4);
 			_boot_metadata_start = .;
 			KEEP(*(.bootloader_metadata))
 			. = ALIGN(4);
-			_boot_metadata_end = .;
 	} >meta
 
-	/* Embed Default Firmware Payload into Slot A & Pad out to 212 KiB */
+	/* Embed Default Firmware Payload into Slot A & Pad */
 	.slot_a_fw : {
-			FILL(0xFF)
 			_slot_a_start = .;
 			KEEP(*(.slot_a_data))
-			. = ORIGIN(slot_a) + LENGTH(slot_a);  /* Force section expansion */
-			_slot_a_end = .;
 	} >slot_a
 
-	/* Embed Default Firmware Payload into Slot B & Pad out to 256 KiB */
 	.slot_b_fw : {
 			_slot_b_start = .;
 			KEEP(*(.slot_b_data))
-			_slot_b_end = .;
 	} >slot_b
+
+	.slot_scratch_fw : {
+			_slot_scratch_start = .;
+	} >slot_scratch
 
 	/* ram, but not cleared on reset, eg boot/app comms */
 	.noinit (NOLOAD) : {
@@ -122,3 +121,4 @@ PROVIDE(_boot_metadata_end   = ORIGIN(meta) + LENGTH(meta));
 
 _slot_a_max_size = LENGTH(slot_a);
 _slot_b_max_size = LENGTH(slot_b);
+_slot_scratch_max_size = LENGTH(slot_scratch);
