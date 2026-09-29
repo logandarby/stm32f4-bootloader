@@ -19,6 +19,7 @@
   (FLASH_SIZE - BOOTLOADER_SIZE - sizeof(vector_table_t) - \
    sizeof(firmware_info_t))
 
+PACKED_STRUCT_BEGIN
 typedef struct {
   uint32_t sentinel;
   uint32_t device_id;
@@ -31,5 +32,6 @@ typedef struct {
   uint32_t _reserved4;
   uint32_t crc32;
 } firmware_info_t;
+PACKED_STRUCT_END
 
 #endif /* A70016D1_0ACE_480C_BAC3_CDD90AD395D5 */

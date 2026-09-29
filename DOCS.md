@@ -5,7 +5,7 @@
 - [Target Firmware Requirements](#target-firmware-requirements)
   - [Linker Script (`.ld`) Configuration](#linker-script-ld-configuration)
   - [Binary File Output Format](#binary-file-output-format)
-  - [Vector Table Relocation (`VTOR`)](#vector-table-relocation-vtor)
+  - [Independent Watchdog (IWDG) Configuration](#independent-watchdog-iwdg-configuration)
   - [Firmware Info Section](#firmware-info-section)
   - [Word / Double-Word Alignment](#word--double-word-alignment)
 - [Firmware Update Mechanism](#firmware-update-mechanism)
@@ -18,7 +18,15 @@
     - [Firmware Protocol Sentinel Packet Values](#firmware-protocol-sentinel-packet-values)
     - [Firmware Protocol Constants](#firmware-protocol-constants)
     - [Firmware Protocol State Machine](#firmware-protocol-state-machine)
-- [Firmware Integrity](#firmware-integrity)
+- [Firmware Integrity \& Rollback](#firmware-integrity--rollback)
+  - [Flash Memory Layout](#flash-memory-layout)
+  - [Bootloader Metadata Configuration](#bootloader-metadata-configuration)
+    - [Bit-Flipping Application Flags (`BLMetaState`)](#bit-flipping-application-flags-blmetastate)
+  - [Downgrade Protection \& Validation Rules](#downgrade-protection--validation-rules)
+  - [Atomic Swap-With-Scratch Engine](#atomic-swap-with-scratch-engine)
+    - [Power-Loss Recovery](#power-loss-recovery)
+  - [Application Confirmation (IWDG) \& Revert Flow](#application-confirmation-iwdg--revert-flow)
+  - [Bootloader State Machine](#bootloader-state-machine)
 
 
 ## How to Initiate a Transfer
@@ -34,9 +42,16 @@ Be sure that the binary file follows the specifications in [Target Firmware Requ
 * **C Standard:** C99
 * **Bootloader Size:** 32 KiB
 * **Bootloader Start Addr:** `0x0800 0000`
-* **Bootloader End Addr:** `0x0800 7FFF`
 
-The bootloader resides in the first two sectors of flash memory (`0x0800 0000` – `0x0800 7FFF`). The application firmware resides in sectors 2–7 from addresses `0x0800 8000` to `0x0807 FFFF`.
+### Memory Map
+
+| Section                  | Description                                                       | Sector(s)      | Size  |
+| ------------------------ | ----------------------------------------------------------------- | -------------- | ----- |
+| Bootloader               | The bootloader handles firmware validation and upgrades.          | Sector 0 and 1 | 32KB  |
+| Bootloader Metadata      | Stores persistent state about firmware upgrades and memory swaps  | Sector 2       | 16KB  |
+| Active Firmware (Slot A) | Where the firmware is stored and executed from                    | Sector 5       | 128KB |
+| Staging (Slot B)         | Where firmware is staged and verified before swapping to slot A   | Sector 6       | 128KB |
+| Scratch Slot             | A scratch slot used for swapping slot A and slot B when necessary | Sector 7       | 128KB |
 
 ---
 
@@ -46,8 +61,8 @@ Application binaries uploaded via this bootloader must be specifically configure
 
 ### Linker Script (`.ld`) Configuration
 
-* **Flash Origin:** Must be set to `0x0800 8000`.
-* **Flash Size:** Maximum `480 KiB` (`0x0007 8000` bytes).
+* **Flash Origin:** Must be set to `0x0802 0000`.
+* **Flash Size:** Maximum `128 KiB`.
 
 Notice a `.firmware_info` section. This is expanded on more in [Firmware Info Section](#firmware-info-section).
 
@@ -55,8 +70,8 @@ Notice a `.firmware_info` section. This is expanded on more in [Firmware Info Se
 MEMORY
 {
   /* First 32 KiB reserved for bootloader */
-  FLASH (rx)  : ORIGIN = 0x08008000, LENGTH = 480K
-  RAM   (rwx) : ORIGIN = 0x20000000, LENGTH = 128K
+  FLASH (rx)  : ORIGIN = 0x08020000, LENGTH = 128K
+  RAM   (rwx) : ORIGIN = 0x20000000, LENGTH = 96K
 }
 
 SECTIONS
@@ -74,31 +89,23 @@ SECTIONS
 ### Binary File Output Format
 
 * The payload binary sent to the host flasher must be a raw binary
-* File offset `0x00000000` in the `.bin` file must directly correspond to Flash address `0x08008000`
+* File offset `0x0000 0000` in the `.bin` file must directly correspond to Flash address `0x08020 000`
 
-### Vector Table Relocation (`VTOR`)
+### Independent Watchdog (IWDG) Configuration
 
-C startup might reset SCB_VTOR, so the `main` function must relocate it to its vector table. For example, using `libopencm3`
+Upon executing a newly swapped application image, the bootloader initializes the hardware (IWDG) with a 5-second timeout window prior to branching to firmware slot A.
 
+Application Confirmation Requirement: The firmware must call `iwdg_ack()` every `IWDG_RECOMMENDED_ACK_INTERVAL_S` seconds to make sure the IWDG knows the program hasn't crashed.
 
-```c
-#include <libopencm3/stm32/memorymap.h>
-
-#define BOOTLOADER_SIZE (0x8000U)
-#define FIRMWARE_START_ADDR (FLASH_BASE + BOOTLOADER_SIZE)
-
-int main(void) {
-    SCB_VTOR = FIRMWARE_START_ADDR;
-    // ... Rest of the application
-}
-
-```
+Automatic Rollback Trigger: If the target application hangs, enters a deadlock, encounters a HardFault, or otherwise fails to acknowledge the IWDG before the 5-second timer expires, the IWDG triggers an MCU hardware reset. Upon reboot, the bootloader detects unconfirmed execution state and automatically triggers a rollback swap to restore the previous backup image.
 
 ### Firmware Info Section
 
 After the vector table, the program must contain a `firmware_info_t` struct with certain fields set. This is then linked in the linker script as `.firmware_info`, and goes after the vector table. Some fields will be dynamically populated on transfer. Below is a table describing the struct. An example can be found in `firmware/src/info.c`.
 
 All uninitialized fields must be set to padding bytes `0xFFFFFFFF`.
+
+**NOTE:** To populate these fields properly (for transfer or to embed in the bootloader binary), you can use the `patch_firmware.py` script. The default firmware and transfer script automatically invoke this to populate the firmware info.
 
 | Field      | Description                                                                                                                                                                                                                                                               | Must be populated in firmware?                                       |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
@@ -328,26 +335,17 @@ typedef enum {
 
 typedef struct {
     uint32_t sentinel;         /* Magic number (0x424F4F54 / "BOOT") */
-    uint32_t swap_state;       /* Current swap state (SWAP_STATE_*) */
-    uint32_t app_state;        /* Application test state (BLMetaState_PENDING_TEST or CONFIRMED) */
     uint32_t active_version;   /* Version number currently running in Slot A */
     uint32_t staging_version;  /* Version number staged in Slot B */
+    uint32_t swap_state;       /* Current swap state (SWAP_STATE_*) */
+    uint32_t state;        /* Application test state (BLMetaState_PENDING_TEST or CONFIRMED) */
     uint32_t active_crc32;     /* Expected hardware CRC32 of Slot A image */
     uint32_t staging_crc32;    /* Hardware CRC32 of Slot B image */
-    
     uint32_t swap_step;        /* Single-word progress tracker (SWAP_STEP_*) */
+    uint32_t _reserved[6];
 } boot_metadata_t;
 
 ```
-
-#### Bit-Flipping Application Flags (`BLMetaState`)
-
-| Hex Value    | State Flag                 | Description                                                                                        |
-| ------------ | -------------------------- | -------------------------------------------------------------------------------------------------- |
-| `0xFFFFFFFF` | `BLMetaState_ERASED`       | Default state after a sector erase.                                                                |
-| `0xFFFFFFFE` | `BLMetaState_PENDING_TEST` | Flips Bit 0. Written prior to executing and testing a newly swapped application.                   |
-| `0xFFFFFFFC` | `BLMetaState_CONFIRMED`    | Flips Bit 1. Written by application via `bootloader_confirm_app()` to verify successful execution. |
-| `0x00000000` | `BLMetaState_ROLLBACK_REQ` | Flips all bits. Triggers automatic swap revert on next boot.                                       |
 
 ---
 

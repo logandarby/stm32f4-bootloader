@@ -40,7 +40,6 @@ bool fw_validate_active_firmware_image(void) {
       FW_CRC_VALIDATE_LEN(MIN(fw_info->length, FIRMWARE_MAX_LEN)) /
       sizeof(uint32_t);
   const uint32_t crc32 = crc32_update_block(start_addr, payload_wrds);
-  crc32_reset();
 
   return crc32 == fw_info->crc32;
 }

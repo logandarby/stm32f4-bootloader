@@ -4,6 +4,7 @@
 
 #include "bl_run.h"
 #include "common.h"
+#include "crc.h"
 #include "inbuilt-button.h"
 #include "led.h"
 #include "memory.h"
@@ -59,10 +60,12 @@ NORETURN int main(void) {
   uart_setup();
   packet_setup();
   led_setup();
+  crc32_setup();
 
   bootloader_run();
 
   led_set(LedState_OFF);
+  crc32_teardown();
   led_teardown();
   uart_teardown();
   inbuilt_button_teardown();

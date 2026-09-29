@@ -7,6 +7,7 @@
 #include "firmware_transfer.h"
 #include "firmware_validation.h"
 #include "inbuilt-button.h"
+#include "iwdg.h"
 #include "led.h"
 #include "memory.h"
 
@@ -20,6 +21,7 @@ typedef enum {
 } BootState;
 
 static void swap_engine_run(void) {
+  // TODO: Swap versions
   // NOTE: All the if statements are necessary, to be able to continue if a
   // swap is in progress
   const bl_metadata_t* meta = bl_metadata_get();
@@ -56,19 +58,9 @@ static void revert_engine_run(void) {
   const bl_metadata_t* meta = bl_metadata_get();
   if (meta->swap_state != BLSwapState_REVERT_IN_PROG) {
     bl_meta_set_swap_state(BLSwapState_REVERT_IN_PROG);
-    // // bl_meta_rewrite(meta->active_version, meta->staging_version,
-    //                 BLSwapState_REVERT_IN_PROG, BLMetaState_CONFIRMED,
-    //                 BLSwapStep_IDLE);
   }
   swap_engine_run();
   bl_meta_set_swap_state(BLSwapState_NONE);
-  // bl_meta_rewrite(meta->active_version, meta->staging_version,
-  //                 BLSwapState_NONE, BLMetaState_CONFIRMED,
-  //                 BLSwapStep_IDLE);
-
-  // /* Restore active/staging version metadata parity */
-  // bl_meta_set_staging_version(0);
-  // bl_meta_set_staging_crc32(0);
 }
 
 static BootState evaluate_metadata_next_state(void) {
@@ -88,9 +80,15 @@ static BootState evaluate_metadata_next_state(void) {
       break;  // Fall through
   }
   switch (bl_metadata_get()->state) {
-    case BLMetaState_PENDING_TEST:
-      bl_meta_set_swap_state(BLSwapState_REVERT_PENDING);
-      return BootState_EXECUTE_REVERT;
+    case BLMetaState_PENDING_TEST:  // Watchdog reset encountered maybe
+      const bool is_wdg_reset = iwdg_was_watchdog_reset();
+      iwdg_clear_reset_flag();
+      if (is_wdg_reset || !fw_validate_active_firmware_image()) {
+        bl_meta_set_swap_state(BLSwapState_REVERT_PENDING);
+        bl_meta_set_swap_step(BLSwapStep_IDLE);
+        return BootState_EXECUTE_REVERT;
+      }
+      return BootState_COMPLETED;
     case BLMetaState_ROLLBACK_REQ:
       bl_meta_set_swap_state(BLSwapState_REVERT_PENDING);
       return BootState_EXECUTE_REVERT;
@@ -146,8 +144,7 @@ void bootloader_run(void) {
 
       case BootState_COMPLETED:
         if (bl_metadata_get()->state == BLMetaState_PENDING_TEST) {
-          // TODO:
-          // iwdg_init_5s();
+          iwdg_set_countdown();
         }
         return;
     }
