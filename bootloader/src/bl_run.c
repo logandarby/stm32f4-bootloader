@@ -55,14 +55,16 @@ static void swap_engine_run(void) {
 static void revert_engine_run(void) {
   const bl_metadata_t* meta = bl_metadata_get();
   if (meta->swap_state != BLSwapState_REVERT_IN_PROG) {
-    bl_meta_rewrite(meta->active_version, meta->staging_version,
-                    BLSwapState_REVERT_IN_PROG, BLMetaState_CONFIRMED,
-                    BLSwapStep_IDLE);
+    bl_meta_set_swap_state(BLSwapState_REVERT_IN_PROG);
+    // // bl_meta_rewrite(meta->active_version, meta->staging_version,
+    //                 BLSwapState_REVERT_IN_PROG, BLMetaState_CONFIRMED,
+    //                 BLSwapStep_IDLE);
   }
   swap_engine_run();
-  bl_meta_rewrite(meta->active_version, meta->staging_version,
-                  BLSwapState_NONE, BLMetaState_CONFIRMED,
-                  BLSwapStep_IDLE);
+  bl_meta_set_swap_state(BLSwapState_NONE);
+  // bl_meta_rewrite(meta->active_version, meta->staging_version,
+  //                 BLSwapState_NONE, BLMetaState_CONFIRMED,
+  //                 BLSwapStep_IDLE);
 
   // /* Restore active/staging version metadata parity */
   // bl_meta_set_staging_version(0);
@@ -121,6 +123,7 @@ void bootloader_run(void) {
         if (fw_is_valid) {
           bl_meta_set_state(BLMetaState_PENDING_TEST);
           bl_meta_set_swap_state(BLSwapState_PENDING);
+          bl_meta_set_swap_step(BLSwapStep_IDLE);
           state = BootState_EXECUTE_SWAP;
         }
         break;

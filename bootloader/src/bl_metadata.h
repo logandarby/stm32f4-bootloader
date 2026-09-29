@@ -33,17 +33,19 @@ typedef enum : uint32_t {
   BLSwapStep_2_SLOTB_DONE = 0xFFFFFFF8
 } BLSwapStep;
 
+PACKED_STRUCT_BEGIN
 typedef struct {
   uint32_t sentinel;
   uint32_t active_version;
   uint32_t staging_version;
-  uint32_t swap_state;  // Bit flipped from 1 to 0
-  uint32_t state;       // Bit flipped from 1 to 0, no erase required
+  uint32_t swap_state;
+  uint32_t state;
   uint32_t active_crc32;
   uint32_t staging_crc32;
   uint32_t swap_step;
   uint32_t _reserved[6];
 } bl_metadata_t;
+PACKED_STRUCT_END
 
 /**
  * Returns if the bootloader meta data is valid (proper CRC, etc)
@@ -70,9 +72,5 @@ void bl_meta_set_new_firmware(uint32_t new_version);
  * Get the data inside
  */
 const bl_metadata_t* bl_metadata_get(void);
-
-void bl_meta_rewrite(uint32_t active_ver, uint32_t staging_ver,
-                     BLSwapState swap_state, BLMetaState app_state,
-                     BLSwapStep swap_step);
 
 #endif /* AB1B8087_A2E1_4E9F_9D58_10B4C15D95C4 */

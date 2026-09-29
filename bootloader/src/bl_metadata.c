@@ -13,6 +13,11 @@ bl_metadata_t bl_metadata = {
     .sentinel = BL_META_SENTINEL,
     .active_version = BL_FACTORY_FIRMWARE_VERSION,
     .staging_version = BL_FACTORY_FIRMWARE_VERSION,
+    .swap_state = 0xFFFFFFFF,
+    .state = BLMetaState_CONFIRMED,
+    .active_crc32 = 0x0,
+    .staging_crc32 = 0x0,
+    .swap_step = BLSwapStep_IDLE,
     ._reserved =
         {
             BL_META_PADDING,
@@ -22,16 +27,11 @@ bl_metadata_t bl_metadata = {
             BL_META_PADDING,
             BL_META_PADDING,
         },
-    .active_crc32 = 0x0,
-    .staging_crc32 = 0x0,
-    .state = BLMetaState_CONFIRMED,
-    .swap_state = BLSwapState_NONE,
-    .swap_step = BLSwapStep_IDLE,
 };
 
-void bl_meta_rewrite(uint32_t active_ver, uint32_t staging_ver,
-                     BLSwapState swap_state, BLMetaState app_state,
-                     BLSwapStep swap_step) {
+static void bl_meta_rewrite(uint32_t active_ver, uint32_t staging_ver,
+                            BLSwapState swap_state, BLMetaState app_state,
+                            BLSwapStep swap_step) {
   bl_metadata_t new_meta = {
       .sentinel = BL_META_SENTINEL,
       .active_version = active_ver,
@@ -55,7 +55,7 @@ static void bl_state_rewrite(BLSwapState swap_state, BLMetaState app_state,
   memcpy(&new_meta, meta, sizeof(bl_metadata_t));
   new_meta.swap_state = swap_state;
   new_meta.state = app_state;
-  new_meta.swap_state = swap_step;
+  new_meta.swap_step = swap_step;
 
   bl_flash_erase_metadata();
   bl_flash_write(LD_BOOT_METADATA_START, (const uint8_t*)&new_meta,
