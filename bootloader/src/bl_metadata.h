@@ -38,11 +38,11 @@ typedef struct {
   uint32_t sentinel;
   uint32_t active_version;
   uint32_t staging_version;
-  uint32_t swap_state;
-  uint32_t state;
+  BLSwapState swap_state;
+  BLMetaState state;
   uint32_t active_crc32;
   uint32_t staging_crc32;
-  uint32_t swap_step;
+  BLSwapStep swap_step;
   uint32_t _reserved[6];
 } bl_metadata_t;
 PACKED_STRUCT_END

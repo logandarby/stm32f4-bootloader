@@ -29,25 +29,6 @@ bl_metadata_t bl_metadata = {
         },
 };
 
-static void bl_meta_rewrite(uint32_t active_ver, uint32_t staging_ver,
-                            BLSwapState swap_state, BLMetaState app_state,
-                            BLSwapStep swap_step) {
-  bl_metadata_t new_meta = {
-      .sentinel = BL_META_SENTINEL,
-      .active_version = active_ver,
-      .staging_version = staging_ver,
-      .swap_state = swap_state,
-      .state = app_state,
-      .active_crc32 = 0x0,
-      .staging_crc32 = 0x0,
-      .swap_step = swap_step,
-  };
-
-  bl_flash_erase_metadata();  // Erases Sector 2 (0x0800 8000)
-  bl_flash_write(LD_BOOT_METADATA_START, (const uint8_t*)&new_meta,
-                 sizeof(bl_metadata_t));
-}
-
 static void bl_state_rewrite(BLSwapState swap_state, BLMetaState app_state,
                              BLSwapStep swap_step) {
   const bl_metadata_t* meta = bl_metadata_get();

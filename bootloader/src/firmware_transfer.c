@@ -191,8 +191,14 @@ bool firmware_transfer_start(void) {
         fw_bytes_written += bytes_to_write;
 
         if (fw_bytes_written >= fw_length) {
-          packet_create_single_byte(&fw_packet_buffer,
-                                    FW_BYTE_FW_UPDATE_SUCCESSFUL);
+          const bool result = fw_validate_staged_firmware_image();
+          if (result) {
+            packet_create_single_byte(&fw_packet_buffer,
+                                      FW_BYTE_FW_UPDATE_SUCCESSFUL);
+          } else {
+            packet_create_single_byte(&fw_packet_buffer, FW_BYTE_NACK);
+            fw_fail();
+          }
           (void)packet_send(&fw_packet_buffer);
           fw_state = FWState_DONE;
         } else {
@@ -202,12 +208,7 @@ bool firmware_transfer_start(void) {
       } break;
 
       case FWState_DONE:
-        if (!fw_validate_staged_firmware_image()) {
-          fw_fail();
-          continue;
-        }
         continue;
-
       default:
         fw_state = FWState_DONE;
         break;

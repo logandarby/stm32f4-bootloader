@@ -4,25 +4,25 @@
 #include "common.h"
 
 // Linker script memory markers
-extern uint32_t _boot_metadata_start;
-extern uint32_t _boot_metadata_end;
+extern uint8_t _boot_metadata_start[];
+extern uint8_t _boot_metadata_end[];
 
-extern uint32_t _slot_a_start;
-extern uint32_t _slot_a_max_size;
+extern uint8_t _slot_a_start[];
+extern uint8_t _slot_a_max_size[];
 
-extern uint32_t _slot_b_start;
-extern uint32_t _slot_b_max_size;
+extern uint8_t _slot_b_start[];
+extern uint8_t _slot_b_max_size[];
 
-extern uint32_t _slot_scratch_start;
-extern uint32_t _slot_scratch_max_size;
+extern uint8_t _slot_scratch_start[];
+extern uint8_t _slot_scratch_max_size[];
 
-#define LD_BOOT_METADATA_START ((uintptr_t)&_boot_metadata_start)
-#define LD_SLOT_A_START ((uintptr_t)&_slot_a_start)
-#define LD_SLOT_A_MAX_SIZE ((uint32_t)&_slot_a_max_size)
-#define LD_SLOT_B_START ((uintptr_t)&_slot_b_start)
-#define LD_SLOT_B_MAX_SIZE ((uint32_t)&_slot_b_max_size)
-#define LD_SLOT_SCRATCH_START ((uintptr_t)&_slot_scratch_start)
-#define LD_SLOT_SCRATCH_MAX_SIZE ((uint32_t)&_slot_scratch_max_size)
+#define LD_BOOT_METADATA_START ((uintptr_t)_boot_metadata_start)
+#define LD_SLOT_A_START ((uintptr_t)_slot_a_start)
+#define LD_SLOT_A_MAX_SIZE ((uintptr_t)_slot_a_max_size)
+#define LD_SLOT_B_START ((uintptr_t)_slot_b_start)
+#define LD_SLOT_B_MAX_SIZE ((uintptr_t)_slot_b_max_size)
+#define LD_SLOT_SCRATCH_START ((uintptr_t)_slot_scratch_start)
+#define LD_SLOT_SCRATCH_MAX_SIZE ((uintptr_t)_slot_scratch_max_size)
 
 #define FIRMWARE_MAX_LEN (MIN(LD_SLOT_A_MAX_SIZE, LD_SLOT_B_MAX_SIZE))
 #define LD_MAX_SLOT_SIZE FIRMWARE_MAX_LEN

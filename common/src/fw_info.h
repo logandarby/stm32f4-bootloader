@@ -31,6 +31,7 @@ typedef struct {
   uint32_t _reserved3;
   uint32_t _reserved4;
   uint32_t crc32;
+  uint8_t signature[2420];
 } firmware_info_t;
 PACKED_STRUCT_END
 

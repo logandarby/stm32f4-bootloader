@@ -3,13 +3,18 @@
         {
             "name": "Linux",
             "includePath": [
-                "${workspaceFolder}/firmware/src/**",
+                "${workspaceFolder}/default_firmware/src/**",
                 "${workspaceFolder}/libopencm3/include",
-                "${workspaceFolder}/common/src"
+                "${workspaceFolder}/common/src",
+                "${workspaceFolder}/mldsa-native/mldsa"
             ],
             "defines": [
                 "STM32F4",
-                "__ARM_ARCH_7EM__"
+                "__ARM_ARCH_7EM__",
+                "MLD_CONFIG_PARAMETER_SET=44",
+                "MLD_CONFIG_REDUCE_RAM",
+                "MLD_CONFIG_NAMESPACE_PREFIX=mldsa",
+                "MLD_CONFIG_NO_RANDOMIZED_API"
             ],
             "compilerPath": "/usr/bin/arm-none-eabi-gcc",
             "cStandard": "c99",
