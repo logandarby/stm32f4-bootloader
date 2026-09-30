@@ -1,5 +1,9 @@
 # STM32F401RE Bootloader
 
+## NOTE: Under Construction
+
+Hey, thanks for for stopping by! Just to let you know, I'm updating this README with better information on the repo within the next couple days. If you're curious about what this bootloader can do, I suggest you take a look at `DOCS.md`.
+
 ## Prerequisites 
 
 - Install ST-Link drivers to flash https://www.st.com/en/development-tools/stsw-link009.html
