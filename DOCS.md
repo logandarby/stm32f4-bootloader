@@ -2,6 +2,7 @@
 
 - [How to Initiate a Transfer](#how-to-initiate-a-transfer)
 - [Preliminary Information](#preliminary-information)
+  - [Memory Map](#memory-map)
 - [Target Firmware Requirements](#target-firmware-requirements)
   - [Linker Script (`.ld`) Configuration](#linker-script-ld-configuration)
   - [Binary File Output Format](#binary-file-output-format)
@@ -21,9 +22,8 @@
 - [Firmware Integrity \& Rollback](#firmware-integrity--rollback)
   - [Flash Memory Layout](#flash-memory-layout)
   - [Bootloader Metadata Configuration](#bootloader-metadata-configuration)
-    - [Bit-Flipping Application Flags (`BLMetaState`)](#bit-flipping-application-flags-blmetastate)
   - [Downgrade Protection \& Validation Rules](#downgrade-protection--validation-rules)
-  - [Atomic Swap-With-Scratch Engine](#atomic-swap-with-scratch-engine)
+  - [Swap-With-Scratch Engine](#swap-with-scratch-engine)
     - [Power-Loss Recovery](#power-loss-recovery)
   - [Application Confirmation (IWDG) \& Revert Flow](#application-confirmation-iwdg--revert-flow)
   - [Bootloader State Machine](#bootloader-state-machine)
@@ -107,18 +107,19 @@ All uninitialized fields must be set to padding bytes `0xFFFFFFFF`.
 
 **NOTE:** To populate these fields properly (for transfer or to embed in the bootloader binary), you can use the `patch_firmware.py` script. The default firmware and transfer script automatically invoke this to populate the firmware info.
 
-| Field      | Description                                                                                                                                                                                                                                                               | Must be populated in firmware?                                       |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| sentinel   | A sentinel used internally to detect the structure prescence                                                                                                                                                                                                              | Yes. Must be 0xC0FFEE00                                              |
-| device_id  | The device ID the firmware wishes to target                                                                                                                                                                                                                               | Yes. Must be the target device ID (Default for this purpose is 0x41) |
-| version    | Version number of the firmware                                                                                                                                                                                                                                            | No                                                                   |
-| length     | Length of the firmware minus the vector table and minus the firmware info                                                                                                                                                                                                 | No                                                                   |
-| _reserved0 | Reserved for future use                                                                                                                                                                                                                                                   | No - Pad to 0xFFFFFFFF                                               |
-| _reserved1 | Reserved for future use                                                                                                                                                                                                                                                   | No - Pad to 0xFFFFFFFF                                               |
-| _reserved2 | Reserved for future use                                                                                                                                                                                                                                                   | No - Pad to 0xFFFFFFFF                                               |
-| _reserved3 | Reserved for future use                                                                                                                                                                                                                                                   | No - Pad to 0xFFFFFFFF                                               |
-| _reserved4 | Reserved for future use                                                                                                                                                                                                                                                   | No - Pad to 0xFFFFFFFF                                               |
-| crc32      | A CRC32 value for an integrity check of the firmware. It is caculated with the bytes of the firmware image minus those in the vector table and minus those in the firmware info section. The CRC is calculated using the internal CRC peripheral of the STM32F401RE chip. | No                                                                   |
+| Field             | Description                                                                                                                                                                                                                                                               | Must be populated in firmware?                                       |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| sentinel          | A sentinel used internally to detect the structure prescence                                                                                                                                                                                                              | Yes. Must be 0xC0FFEE00                                              |
+| device_id         | The device ID the firmware wishes to target                                                                                                                                                                                                                               | Yes. Must be the target device ID (Default for this purpose is 0x41) |
+| version           | Version number of the firmware                                                                                                                                                                                                                                            | No                                                                   |
+| length            | Length of the firmware minus the vector table and minus the firmware info                                                                                                                                                                                                 | No                                                                   |
+| _reserved0        | Reserved for future use                                                                                                                                                                                                                                                   | No - Pad to 0xFFFFFFFF                                               |
+| _reserved1        | Reserved for future use                                                                                                                                                                                                                                                   | No - Pad to 0xFFFFFFFF                                               |
+| _reserved2        | Reserved for future use                                                                                                                                                                                                                                                   | No - Pad to 0xFFFFFFFF                                               |
+| _reserved3        | Reserved for future use                                                                                                                                                                                                                                                   | No - Pad to 0xFFFFFFFF                                               |
+| _reserved4        | Reserved for future use                                                                                                                                                                                                                                                   | No - Pad to 0xFFFFFFFF                                               |
+| crc32             | A CRC32 value for an integrity check of the firmware. It is caculated with the bytes of the firmware image minus those in the vector table and minus those in the firmware info section. The CRC is calculated using the internal CRC peripheral of the STM32F401RE chip. | No                                                                   |
+| `signature[2420]` | The MLDSA44 signature of the firmware image, starting from after the firmware info header. Right now the repository is configured to use the public private key pair found in the python CLI tool, and the key in `key.c`                                                 | No                                                                   |
 
 ### Word / Double-Word Alignment
 
@@ -295,6 +296,8 @@ Application execution always occurs out of **Slot A (Primary)** at physical orig
 
 A dedicated **Boot Metadata Sector** (Sector 2) stores persistent state, image versions, and progress flags across reboots. To minimize flash wear and guarantee atomicity across unexpected power losses mid-swap, state transitions and progress markers utilize a zero-erase bit-flipping methodology.
 
+Each firmware image contains a firmware info header containing version info, CRC32 integrity, as well as a MLDSA44 FIPS202 signature to prevent fraudulent images. If the integrity or signature check fails, automatic rollback is performed.
+
 ---
 
 ### Flash Memory Layout
@@ -354,12 +357,13 @@ typedef struct {
 Before marking Slot B payload as valid and writing `SWAP_STATE_PENDING`, the bootloader verifies three validation constraints against the incoming payload:
 
 * **CRC32 Integrity Check:** The calculated STM32 hardware CRC32 of the payload written to Slot B must match the expected checksum.
+* **MLDSA44 Signature Check:** Verifies using the in-memory public key that the signature of the firmware image is valid. 
 * **Downgrade Protection:** The incoming version (`staging_version`) must be strictly greater than or equal to `active_version`. Decrementing versions are rejected with `FW_BYTE_NACK`.
 * **Slot Size Check:** Firmware length must not exceed 128 KiB (`0x0002 0000` bytes) to fit within Sector 5 limits.
 
 ---
 
-### Atomic Swap-With-Scratch Engine
+### Swap-With-Scratch Engine
 
 Because both Slot A (Sector 5) and Slot B (Sector 6) are 1:1 symmetrical 128 KiB sectors, the swap algorithm executes cleanly using full 128 KiB hardware sector erases with Sector 7 acting as the Scratch staging area:
 
@@ -368,11 +372,8 @@ Because both Slot A (Sector 5) and Slot B (Sector 6) are 1:1 symmetrical 128 KiB
 
 ```
 
-1. **State Initialization:** The bootloader writes `SWAP_STATE_IN_PROGRESS` to Sector 2 metadata.
-2. **Step 0 (Slot A $\rightarrow$ Scratch):** If `swap_step == SWAP_STEP_IDLE`, erase Sector 7 (Scratch), copy 128 KiB from Sector 5 (Slot A) into Sector 7, and bit-flip `swap_step = SWAP_STEP_0_SCRATCH_DONE`.
-3. **Step 1 (Slot B $\rightarrow$ Slot A):** If `swap_step == SWAP_STEP_0_SCRATCH_DONE`, erase Sector 5 (Slot A), copy 128 KiB from Sector 6 (Slot B) into Sector 5, and bit-flip `swap_step = SWAP_STEP_1_SLOTA_DONE`.
-4. **Step 2 (Scratch $\rightarrow$ Slot B):** If `swap_step == SWAP_STEP_1_SLOTA_DONE`, erase Sector 6 (Slot B), copy 128 KiB from Sector 7 (Scratch) into Sector 6, and bit-flip `swap_step = SWAP_STEP_2_SLOTB_DONE`.
-5. **Completion:** `swap_state` transitions to `SWAP_STATE_COMPLETED` and `app_state` transitions to `BLMetaState_PENDING_TEST`.
+The `swap_state` variable is set to keep track of the progress of the swap in case of power failure.
+
 
 #### Power-Loss Recovery
 
@@ -382,12 +383,13 @@ If power is lost during any step, the bootloader reboots, reads `swap_state == S
 
 ### Application Confirmation (IWDG) & Revert Flow
 
+Upon firmware swap, the IWDG is initialized, the the firmware image must query it at a ~2s interval to ensure that the application has not hung.
+
 To guard against software hangs, crashes, or hard faults in newly swapped applications:
 
 1. Upon jumping to Slot A (`0x0802 0000`) in `BLMetaState_PENDING_TEST`, the bootloader initializes the IWDG with a **5-second timeout window**.
-2. The main application must initialize its peripherals and invoke `bootloader_confirm_app()` before the watchdog expires.
-3. `bootloader_confirm_app()` writes `0xFFFFFFFC` (`BLMetaState_CONFIRMED`) directly to `app_state` in Sector 2 Flash (zero-erase bit-flip) and continuously feeds the watchdog.
-4. **Revert Sequence:** If the application hangs or crashes before confirming, the IWDG forces a system reset. On reboot, the bootloader reads `BLMetaState_PENDING_TEST`, writes `SWAP_STATE_REVERT_PENDING`, resets `swap_step` to `SWAP_STEP_IDLE`, and re-executes the swap engine to exchange Sector 5 and Sector 6 back, restoring the known-good backup image.
+2. The firmware app must acknowledge the IWDG using `iwdg_ack()` every ~2s
+3. Revert Sequence: If the application hangs or crashes before confirming, the IWDG forces a system reset. On reboot, the bootloader reads `BLMetaState_PENDING_TEST`, and re-executes the swap engine to exchange Sector 5 and Sector 6 back, restoring the known-good backup image.
 
 ---
 
