@@ -65,7 +65,7 @@ make
 st-flash --reset write bootloader.bin 0x08000000
 ```
 
-### Debugging with Coretx-Debug and VSCode
+### Debugging with Cortex-Debug and VSCode
 
 This project is pre-configured to offer an ultra-easy flashing and debugging expeience with the `cortex-debug` extension using vscode. For the easiest flashing/debugging experience, it's recommended these IDEs and extensions are used.
 
