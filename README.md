@@ -27,7 +27,7 @@ I built this project to dive deep into bare-metal embedded systems, memory-mappe
 ### Robust 3-Layer Communications Protocol
 
 * **Layer 0 (Physical/Driver):** Interrupt-driven `USART2_IRQ` paired with a custom lock-free ring buffer for byte reception, preventing dropped bytes during flash programming operations.
-* **Layer 1 (Packet Transport):** Fixed 19-byte packets framed with a `0xAA` Start-of-Frame (SOF) sentinel, control flags, length headers, a 16-byte payload, and a CRC8 byte. Includes an automatic link-layer retransmission (ReTx) loop to handle noisy lines.
+* **Layer 1 (Packet Transport):** Fixed 19-byte packets framed with a `0xAA` Start-of-Frame (SOF) sentinel, control flags, length headers, a 16-byte payload, and a CRC8 byte. Includes an automatic link-layer retransmission (ReTx) loop to handle noisy lines and corruption.
 * **Layer 2 (Firmware Application Protocol):** A state machine governing multi-byte sync sequences, device ID handshakes, chunked payload streaming, and flow control.
 
 ---
